@@ -1,0 +1,4 @@
+*.py[dc]
+build/
+llmc/sparse.c
+
