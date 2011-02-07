@@ -45,11 +45,11 @@ cdef:
     int   count
     void* items  
 
-  void al_initialize(_array_list* l, int count, int item_size):
+  void al_initialize(array_list* l, int count, int item_size):
     l.count = count
     l.items = malloc(count*item_size) 
 
-  void al_delete(_array_list* l):
+  void al_delete(array_list* l):
     free(l.items)
     free(l)
   
@@ -159,8 +159,8 @@ cdef:
     cdef vector* v = <vector*>malloc(sizeof(vector))
     v.sum = 0
     v.store = femap_new()
-    v.parent = 0
-    v.aux = 0
+    v.parent = <vector*> 0
+    v.aux = <void*> 0
     return v
 
   void vector_delete(vector *v):
@@ -450,64 +450,6 @@ cdef:
     free(view)
 
 
-# topic model (lda, hdp)
-cdef:
-  struct sample_buffer:
-    double prob
-    void  *ptr
-
-  struct vec_group:
-    int    count
-    vector **vec
-
-  struct document:
-    int     count
-    int    *words
-  
-  struct topic_model:
-    int vocab_size
-    int doc_count
-    documents* docs
-    matrix *m_vocab  # N*W
-    matrix *m_doc    # KD*N
-      # col.aux => vec_group
-    matrix *m_topic  # D*KD
-    matrix_mult_view *view_doc_word #m_doc*m_vocab
-    matrix_mult_view *view_topic_word #m_topic*m_doc*m_vocab
-    sample_buffer buf[MAX_SAMPLE_BUFFER]
-  
-  cdef inline vector* _get_first(vector* vec):
-    return <vector*> vec.store.list.next.data
-
-  cdef void resample_topic_model(topic_model* t, double alpha, double beta):
-    cdef _ll_item *p = t.m_doc.cols.head.next
-    cdef _ll_item *q
-    cdef vector *row, *col, *topic_row, *topic_col, *temp, *word, *topic_word
-    cdef vec_group *group
-    cdef int i
-    while p:    
-      col = <vector*> p.data
-      row = <vector*> _get_first(col)
-      matrix_update(t.m_docs, -1, row, col)      
-
-      word = _get_first(mult_view_map_to_right(m.view_doc_word, col))
-      topic_word = mult_view_map_prod_col(m.view_topic_word, word)
-
-      group = <vec_group*> col.aux
-      for i in range(group.count):
-        row = group.vec[i]    
-        temp = mult_view_map_prod_row(m.view_doc_word, row)
-        topic_col = mult_view_map_to_left(m.view_topic_word, temp)
-        topic_row = mult_view_map_prod_row(m.view_topic_word, _get_first(topic_col))
-        count = get_matrix_entry(m.view_topic_word.prod, topic_row, topic_word).value
-        t.buf[i].prob = \
-            (row.sum+alpha)*(count+beta)/(topic_row.sum+t.vocab_size*beta)
-        t.buf[i].ptr = <void*>row
-      
-      row = sample_unnormalized(t.buf, group.count)      
-      matrix_update(t.m_docs, +1, row, col)
-      p = p.next
-      
 
 ###################### 
 # unit testing       #  
