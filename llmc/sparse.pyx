@@ -8,12 +8,8 @@
     6) squeeze out empty rows
 
 """
-cdef extern from "stdlib.h":
-  void free(void *ptr)
-  void *malloc(size_t size)
-
-cdef extern from "stdio.h":
-  int printf(char *format, ...)
+from libc.stdlib cimport free, malloc, rand, RAND_MAX
+from libc.stdio cimport printf
 
 cdef extern from 'hash-table.h':
   struct HashTable:
@@ -521,8 +517,17 @@ cdef:
     return mult_view_map_prod_col(v2, temp) # col in D
 
   void* sample_unnormalized(sample_buffer *buf, int count):
-    return buf[0].ptr
- 
+    cdef int i
+    cdef double sum = 0
+    for i in range(count):
+      sum += buf[i].prob
+    cdef double coin = (rand()+0.0)/RAND_MAX*sum
+    sum = 0
+    for i in range(count):
+      sum += buf[i].prob
+      if sum >= coin:
+        return buf[i].ptr
+     
   int _get_sample_buffer(topic_model*t, vector* col, double alpha, double beta):
     cdef vector *word, *topic_row, *row
     cdef vec_group *group        
@@ -1044,3 +1049,4 @@ class TestTopicModel:
     
     for i in xrange(30):
       model.gibbs_iteration()
+
