@@ -630,7 +630,7 @@ cdef class FixedTopicModel:
       if debug:
         _row = topics[debug[j]]
       else:
-        _row = random.choose(topics)
+        _row = random.choice(topics)
       row = <vector*><int> _row
       matrix_update(self.t.m_docs, +1, row, col)    
       j += 1
@@ -638,6 +638,22 @@ cdef class FixedTopicModel:
 
   def gibbs_iteration(self):
     resample_topic_model(self.t, self.alpha, self.beta)
+
+  def export_assignment(self):
+    sparse = _to_scipy_matrix(<int>self.t.m_docs)
+    topic_map = dict()
+    for row, col in sparse.iterkeys():
+      topic_map[col] = row
+    index = 0
+    exported = []
+    for i, col in enumerate(self.doc_columns):
+      this_doc = []
+      for j in xrange(index, index+len(col)):
+        topic = topic_map[j] - i*self._topic_count
+        this_doc.append(topic)
+      index += len(col)
+      exported.append(this_doc)
+    return exported
 
 ###################### 
 # unit testing       #  
@@ -781,13 +797,11 @@ cpdef _to_scipy_matrix(_m):
   
   for _col in cols:
     col = <vector*><int>_col
-    assert <int>col in col_map
     cord = to_data_array(<int>col.store.list)
     for _entry in cord:
       entry = <matrix_entry*><int> _entry
       row = entry.row
       mat[row_map[<int>row], col_map[<int>col]] = entry.value
-    assert mat[:,col_map[<int>col]].sum() == col.sum     
     
   return mat
 
@@ -991,6 +1005,13 @@ def assert_mat_equal(_m, mat):
   _assert_matrix_equal(mat_reverse, mat)
   eq_( _get_nnz(to_data_array(<int>m.cols)), mat.getnnz())
 
+def _assert_2d_list(list1, list2):
+  eq_(len(list1), len(list2))
+  for l1,l2 in zip(list1,list2):
+    eq_(len(l1),len(l2))
+    for a,b in zip(l1,l2):
+      eq_(a,b)
+
 class TestTopicModel:
   def test_topic_model(self):
     vocab_size = 6
@@ -1028,6 +1049,9 @@ class TestTopicModel:
     assert_mat_equal(<int>model.t.view_doc_word.prod, prod1)
     prod2 = np.dot(topic_mat, prod1)
     assert_mat_equal(<int>model.t.view_topic_word.prod, prod2)
+    
+    exported = model.export_assignment()
+    _assert_2d_list(exported, topic_select)
 
     cdef vector* col
     cdef vector* row
