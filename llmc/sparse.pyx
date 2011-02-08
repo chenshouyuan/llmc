@@ -189,6 +189,13 @@ cdef:
     femap_remove(entry.col.store, <void*>entry.row)
     free(entry)
 
+  int get_matrix_entry(row_type *row, col_type *col):
+    cdef matrix_entry *p = <matrix_entry*>femap_lookup(col.store, <void*>row)
+    if not p:
+      return 0
+    else:
+      return p.value 
+
   int update_matrix_entry(int delta, row_type *row, col_type *col):
     row.sum += delta
     col.sum += delta   
@@ -233,13 +240,15 @@ cdef:
 
   vector* matrix_insert_new_row(matrix *m):
     cdef vector* new_row = matrix_insert_new_row_dry(m)
-    for i  in range(m.callback_count):
+    cdef int i
+    for i in range(m.callback_count):
       if m.callbacks[i].insert_new_row:
         m.callbacks[i].insert_new_row(m.callbacks[i].ptr, new_row)
     return new_row
 
   vector* matrix_insert_new_col(matrix *m):
     cdef vector* new_col = matrix_insert_new_col_dry(m)
+    cdef int i
     for i in range(m.callback_count):
       if m.callbacks[i].insert_new_col:
         m.callbacks[i].insert_new_col(m.callbacks[i].ptr, new_col)
@@ -249,15 +258,22 @@ cdef:
     m.callbacks[m.callback_count] = cb
     m.callback_count += 1
 
-  matrix* matrix_new(bint squeeze_row, bint squeeze_col):
-    cdef matrix* m = <matrix*>malloc(sizeof(matrix))
-    m.rows = ll_new()
-    m.cols = ll_new()
+
+  matrix* matrix_new_dry():
+    cdef matrix* m = <matrix*>malloc(sizeof(matrix))    
     m.row_count = 0
     m.col_count = 0
+    m.squeeze_row = 0
+    m.squeeze_col = 0
+    m.callback_count = 0 
+    return m
+
+  matrix* matrix_new(bint squeeze_row, bint squeeze_col):
+    cdef matrix* m = matrix_new_dry()
+    m.rows = ll_new()
+    m.cols = ll_new()
     m.squeeze_row = squeeze_row
     m.squeeze_col = squeeze_col
-    m.callback_count = 0
     return m
 
   void _vector_delete_iter(void* data):
@@ -265,6 +281,7 @@ cdef:
     vector_delete(v)
 
   void matrix_delete(matrix *m):
+    cdef int i
     ll_for_each(m.rows, _vector_delete_iter)
     ll_for_each(m.cols, _vector_delete_iter)
     ll_delete(m.rows)
@@ -274,6 +291,7 @@ cdef:
     free(m)
 
   void matrix_remove_row(matrix *m, row_type *row):
+    cdef int i
     for i in range(m.callback_count):
       if m.callbacks[i].remove_row:
         m.callbacks[i].remove_row(m.callbacks[i].ptr, row)    
@@ -282,6 +300,7 @@ cdef:
     ll_remove(m.rows, row.link)
 
   void matrix_remove_col(matrix *m, col_type *col):
+    cdef int i
     for i in range(m.callback_count):
       if m.callbacks[i].remove_col:
         m.callbacks[i].remove_col(m.callbacks[i].ptr, col)       
@@ -291,6 +310,7 @@ cdef:
 
   void matrix_update(matrix* m, int delta, row_type* row, col_type *col):
     cdef int res = update_matrix_entry(delta, row, col)
+    cdef int i
     m.nnz += res
     for i in range(m.callback_count):
       if m.callbacks[i].update:
@@ -316,7 +336,6 @@ cdef:
 
   vector* mult_view_map_prod_col(matrix_mult_view *view, col_type *col):
     return <vector*>hash_table_lookup(view.right_col_map, col)
-
 
   void cb_mult_update_right(void *ptr, int delta, row_type *row, col_type *col):
     cdef matrix_mult_view *view = <matrix_mult_view*> ptr
@@ -410,13 +429,19 @@ cdef:
     hash_table_insert(view.left_col_map, <void*>new_col, <void*>row)    
     hash_table_insert(view.right_row_map, <void*>row, <void*>new_col)    
 
-  matrix_mult_view* mult_view_new(matrix *left, matrix *right):
+
+  # associate three matrices, left, right and prod
+  # such that left*right = prod is always maintained
+  # NOTE: this function requires left/right/prod being empty
+
+  matrix_mult_view* mult_view_new(matrix *left, matrix *right, matrix *prod):
     cdef matrix_mult_view *view = <matrix_mult_view*>malloc(sizeof(matrix_mult_view))
     cdef update_callback *cb
 
     view.left = left
     view.right = right
-    view.prod = matrix_new(left.squeeze_row, right.squeeze_col)
+    view.prod = prod
+
     view.left_col_map = hash_table_new(pointer_hash, pointer_equal)
     view.left_row_map = hash_table_new(pointer_hash, pointer_equal)
     view.right_col_map = hash_table_new(pointer_hash, pointer_equal)
@@ -446,15 +471,173 @@ cdef:
     hash_table_free(view.left_row_map)
     hash_table_free(view.right_col_map)
     hash_table_free(view.right_row_map)
-    matrix_delete(view.prod)
     free(view)
+ 
+  # summation is not useful 
+  # when the matrix structure varies overtime (HDP)
+  # TODO: check this again
 
+# topic model (lda, hdp)
+DEF MAX_SAMPLE_BUFFER = 2000
+cdef:
+  struct sample_buffer:
+    double prob
+    void  *ptr
 
+  struct vec_group:
+    int    count
+    vector **vec
+
+  struct document:
+    int     count
+    int    *words
+  
+  struct topic_model:
+    int vocab_size
+    int doc_count
+    document* docs
+    matrix *m_vocab  # N*W
+    matrix *m_docs   # KD*N
+      # col.aux => vec_group
+    matrix *m_topic  # K*KD
+    matrix_mult_view *view_doc_word #m_doc*m_vocab
+    matrix_mult_view *view_topic_word #m_topic*m_doc*m_vocab
+    sample_buffer buf[MAX_SAMPLE_BUFFER]
+  
+  inline matrix_entry* _get_first(vector* vec):
+    return <matrix_entry*>vec.store.list.head.next.data
+
+  # consider D=A*(B*C)
+  inline vector* _to_l(matrix_mult_view *v1, matrix_mult_view *v2, vector* vec):
+    cdef vector* temp
+    temp = mult_view_map_prod_row(v1, vec) # row in (B*C)
+    temp = _get_first(mult_view_map_to_left(v2, temp)).row # row in A
+    return mult_view_map_prod_row(v2, temp) # row in D
+
+  inline vector* _to_r(matrix_mult_view *v1, matrix_mult_view *v2, vector* vec):
+    cdef vector* temp
+    temp = _get_first(mult_view_map_to_right(v1, vec)).col # col in C
+    temp = mult_view_map_prod_col(v1, temp) # col in (B*C)
+    return mult_view_map_prod_col(v2, temp) # col in D
+
+  void* sample_unnormalized(sample_buffer *buf, int count):
+    return buf[0].ptr
+ 
+  void _get_sample_buffer(topic_model*t, vector* col, double alpha, double beta):
+    cdef vector *word, *topic_row, *row
+    cdef vec_group *group        
+    cdef int i, count
+    word = _to_r(t.view_doc_word, t.view_topic_word, col)
+    group = <vec_group*> col.aux
+    for i in range(group.count):
+      row = group.vec[i]    
+      topic_row = _to_l(t.view_doc_word, t.view_topic_word, row)
+      count = get_matrix_entry(topic_row, word)
+      t.buf[i].prob = \
+          (row.sum+alpha)*(count+beta)/(topic_row.sum+t.vocab_size*beta)
+      t.buf[i].ptr = <void*>row
+    
+  void resample_topic_model(topic_model* t, double alpha, double beta):
+    cdef _ll_item *p = t.m_docs.cols.head.next
+    cdef vector *row, *col
+    cdef int i, count
+    while p:    
+      col = <vector*> p.data
+      row = <vector*> _get_first(col).row
+      matrix_update(t.m_docs, -1, row, col)           
+      _get_sample_buffer(t, col, alpha, beta)
+      row = <row_type*> sample_unnormalized(t.buf, group.count)      
+      matrix_update(t.m_docs, +1, row, col)
+      p = p.next
+
+import random
+
+cdef class FixedTopicModel:
+  cdef topic_model *t
+  cdef object _vocab_list
+  cdef object _topic_rows
+  cdef int    _topic_count
+  cdef double alpha, beta
+  cdef object doc_columns
+
+  def __init__(self, k, vocab_size, alpha, beta):
+    cdef matrix *prod1, *prod2
+    self.alpha = alpha
+    self.beta = beta
+
+    self.t = <topic_model*>malloc(sizeof(topic_model))
+    self.t.doc_count = 0
+    self.t.vocab_size = 0
+    self.t.m_docs = matrix_new(0,0)
+    self.t.m_vocab = matrix_new(0,0)
+    self.t.m_topic = matrix_new(0,0)
+
+    prod1 = matrix_new(0,0)
+    self.t.view_doc_word = mult_view_new(self.t.m_docs, self.t.m_vocab, prod1)
+
+    prod2 = matrix_new(0,0)
+    self.t.view_topic_word = mult_view_new(self.t.m_topic, prod1, prod2)
+
+    if not k is None:
+      self.set_topic_num(k)    
+    if not vocab_size is None:
+      self.set_vocab_size(vocab_size)
+
+    self.doc_columns = []
+
+  def set_topic_num(self, k):
+    self._topic_count = <int> k
+    self._topic_rows = [<int>matrix_insert_new_row(self.t.m_topic) for i in xrange(k)]
+
+  def set_vocab_size(self, vocab_size):
+    self.t.vocab_size = vocab_size
+    self._vocab_list = [<int>matrix_insert_new_col(self.t.m_vocab) for i in xrange(vocab_size)]
+
+  def add_new_document(self, word_list, debug=None):
+    cdef vector *topic_row, *row, *col, *temp
+    cdef vec_group *group = <vec_group*>malloc(sizeof(vec_group))
+
+    self.t.doc_count += 1
+
+    topics = [<int>matrix_insert_new_row(self.t.m_docs) for _x in xrange(self._topic_count)]
+    group.count = self._topic_count
+    group.vec = <vector**>malloc(sizeof(vector*)*group.count)
+
+    cdef int i = 0
+    for _topic_row, _row in zip(self._topic_rows, topics):
+      row = <vector*> <int> _row
+      topic_row = <vector*> <int> _topic_row
+      temp = mult_view_map_prod_row(self.t.view_doc_word, row)
+      col = mult_view_map_to_left(self.t.view_topic_word, temp)
+      matrix_update(self.t.m_topic, +1, topic_row, col)
+      group.vec[i] = row
+      i += 1
+  
+    word_cols = [<int>matrix_insert_new_col(self.t.m_docs) for w in word_list]
+    j = 0
+    for _col, word in zip(word_cols, word_list):
+      col = <vector*><int> _col
+      row = mult_view_map_to_right(self.t.view_doc_word, col)
+      temp = <vector*><int> self._vocab_list[word]
+      matrix_update(self.t.m_vocab, +1, row, temp)          
+      col.aux = <void*> group             
+      if debug:
+        _row = topics[debug[j]]
+      else:
+        _row = random.choose(topics)
+      row = <vector*><int> _row
+      matrix_update(self.t.m_docs, +1, row, col)    
+      j += 1
+    self.doc_columns.append(word_cols)
+
+  def gibbs_iteration(self):
+    resample_topic_model(self.t, self.alpha, self.beta)
 
 ###################### 
 # unit testing       #  
 ######################
 from nose.tools import *
+import unittest
 
 def to_array(_l):
   l = <_linked_list*><int> _l
@@ -617,7 +800,7 @@ import numpy as np
 def _assert_matrix_equal(m1, m2):
   eq_(m1.shape, m2.shape)
   r = m1.toarray()-m2.toarray()
-  assert (r**2).sum() <= 0.0001
+  assert (r**2).sum() <= 0.0001, "%r != %r" % (m1.toarray(), m2.toarray())
 
 class TestMatrix:
   def test_create_delete(self):
@@ -682,10 +865,12 @@ class TestMatrix:
     cdef matrix_mult_view *view
     l = matrix_new(0,0)
     r = matrix_new(0,0)
-    view = mult_view_new(l, r)
+    p = matrix_new(0,0)
+    view = mult_view_new(l, r, p)
     mult_view_delete(view)    
     matrix_delete(l)
     matrix_delete(r)
+    matrix_delete(p)    
 
 
   def test_mult_view_insert_remove(self):
@@ -693,8 +878,8 @@ class TestMatrix:
     cdef matrix_mult_view *view
     l = matrix_new(0,0)
     r = matrix_new(0,0)
-    view = mult_view_new(l, r)
-    p = view.prod
+    p = matrix_new(0,0)
+    view = mult_view_new(l, r, p)
     
     left_shape = (5,4)
     right_shape = (4,10)
@@ -723,6 +908,7 @@ class TestMatrix:
     mult_view_delete(view)    
     matrix_delete(l)
     matrix_delete(r)
+    matrix_delete(p)
 
   def _shape(self, _m, shape):
     cdef matrix *m = <matrix*><int>_m
@@ -737,7 +923,8 @@ class TestMatrix:
     mr = scipy.sparse.dok_matrix(fr)
     l = matrix_new(0,0)
     r = matrix_new(0,0)    
-    view = mult_view_new(l, r)       
+    p = matrix_new(0,0)
+    view = mult_view_new(l, r, p)       
     lr = [<int>matrix_insert_new_row(l) for i in xrange(fl.shape[0])]
     lc = [<int>matrix_insert_new_col(l) for i in xrange(fl.shape[1])]
     for key,value in ml.iteritems():
@@ -753,7 +940,6 @@ class TestMatrix:
       matrix_update(r, value, \
           <vector*><int>rr[row], <vector*><int>rc[col])
     
-    p = view.prod
     self.row_p = to_data_array(<int>p.rows)
     self.col_p = to_data_array(<int>p.cols)
     mp = np.dot(ml,mr)
@@ -777,6 +963,7 @@ class TestMatrix:
     mult_view_delete(view)    
     matrix_delete(l)
     matrix_delete(r)
+    matrix_delete(p)
 
   # TODO: A*B*C ... 
 
@@ -790,4 +977,67 @@ class TestMatrix:
     matrix_update(<matrix*><int>self._m, delta,
                   <vector*><int> self.row_p[row],
                   <vector*><int> self.col_p[col])
-    
+
+
+def assert_mat_equal(_m, mat):
+  cdef matrix* m = <matrix*><int> _m
+  mat_reverse = _to_scipy_matrix(<int>_m)
+  _assert_matrix_equal(mat_reverse, mat)
+  eq_( _get_nnz(to_data_array(<int>m.cols)), mat.getnnz())
+
+class TestTopicModel:
+  def test_topic_model(self):
+    vocab_size = 6
+    k = 3
+    alpha = 0.1
+    beta = 0.2
+    word_lists = [[0,1,2], [3,4,5], [1,3,5], [0,2,4]]    
+    topic_select = [[random.randint(0,k-1) for _x in _y] for _y in word_lists]
+    column_indices = []
+    _j = 0
+    for _y in word_lists:
+      column_indices.append(list(range(_j, _j+len(_y))))
+      _j += len(_y)
+
+    model = FixedTopicModel(k, vocab_size, alpha, beta)
+    for l,t in zip(word_lists, topic_select):
+      model.add_new_document(l, debug = t)
+    flatten = sum(word_lists,[])
+    vocab_mat = scipy.sparse.dok_matrix((len(flatten),vocab_size))
+    for i, w in enumerate(flatten):
+      vocab_mat[i, w] = 1
+    assert_mat_equal(<int>model.t.m_vocab, vocab_mat)
+    topic_mat = scipy.sparse.dok_matrix((k, k*len(word_lists)))
+    for i in xrange(k):
+      for j in xrange(len(word_lists)):
+        topic_mat[i, j*k+i] = 1
+    assert_mat_equal(<int>model.t.m_topic, topic_mat)
+    doc_mat = scipy.sparse.dok_matrix((k*len(word_lists), len(flatten)))
+    for i, doc in enumerate(word_lists):
+      for j, w in enumerate(doc):
+        doc_mat[i*k+topic_select[i][j], column_indices[i][j]] = 1
+
+    assert_mat_equal(<int>model.t.m_docs, doc_mat)
+    prod1 = np.dot(doc_mat, vocab_mat)
+    assert_mat_equal(<int>model.t.view_doc_word.prod, prod1)
+    prod2 = np.dot(topic_mat, prod1)
+    assert_mat_equal(<int>model.t.view_topic_word.prod, prod2)
+
+    cdef vector* col
+    cdef vector* row
+    cdef int _i
+    for i in xrange(len(word_lists)):
+      for j in xrange(len(word_lists[i])):
+        _col,_word = model.doc_columns[i][j], word_lists[i][j]
+        col = <vector*><int>_col
+        row = _get_first(col).row
+        matrix_update(model.t.m_docs, -1, row, col)
+        doc_mat[i*k+topic_select[i][j], column_indices[i][j]] = 0
+        _get_sample_buffer(model.t, col, <double>alpha, <double>beta)
+        prod = np.dot(topic_mat, np.dot(doc_mat, vocab_mat))
+        for _i in range(k):
+          truth = (doc_mat[i*k+_i,:].sum()+alpha)*(prod[_i, _word]+beta)/(prod[_i,:].sum()+vocab_size*beta)
+          eq_(<double>truth, <double>model.t.buf[_i].prob)
+        matrix_update(model.t.m_docs, +1, row, col)
+        doc_mat[i*k+topic_select[i][j], column_indices[i][j]] = 1
+
