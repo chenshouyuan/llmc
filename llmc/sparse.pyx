@@ -523,7 +523,7 @@ cdef:
   void* sample_unnormalized(sample_buffer *buf, int count):
     return buf[0].ptr
  
-  void _get_sample_buffer(topic_model*t, vector* col, double alpha, double beta):
+  int _get_sample_buffer(topic_model*t, vector* col, double alpha, double beta):
     cdef vector *word, *topic_row, *row
     cdef vec_group *group        
     cdef int i, count
@@ -536,6 +536,7 @@ cdef:
       t.buf[i].prob = \
           (row.sum+alpha)*(count+beta)/(topic_row.sum+t.vocab_size*beta)
       t.buf[i].ptr = <void*>row
+    return group.count
     
   void resample_topic_model(topic_model* t, double alpha, double beta):
     cdef _ll_item *p = t.m_docs.cols.head.next
@@ -545,8 +546,8 @@ cdef:
       col = <vector*> p.data
       row = <vector*> _get_first(col).row
       matrix_update(t.m_docs, -1, row, col)           
-      _get_sample_buffer(t, col, alpha, beta)
-      row = <row_type*> sample_unnormalized(t.buf, group.count)      
+      count = _get_sample_buffer(t, col, alpha, beta)
+      row = <row_type*> sample_unnormalized(t.buf, count)      
       matrix_update(t.m_docs, +1, row, col)
       p = p.next
 
@@ -1040,4 +1041,6 @@ class TestTopicModel:
           eq_(<double>truth, <double>model.t.buf[_i].prob)
         matrix_update(model.t.m_docs, +1, row, col)
         doc_mat[i*k+topic_select[i][j], column_indices[i][j]] = 1
-
+    
+    for i in xrange(30):
+      model.gibbs_iteration()
