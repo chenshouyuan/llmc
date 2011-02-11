@@ -473,7 +473,10 @@ cdef:
   # when the matrix structure varies overtime (HDP)
   # TODO: check this again
 
-# topic model (lda, hdp)
+##############
+# lda
+##############
+
 DEF MAX_SAMPLE_BUFFER = 2000
 cdef:
   struct sample_buffer:
@@ -483,7 +486,7 @@ cdef:
   struct vec_group:
     int    count
     vector **vec
-
+  
   struct document:
     int     count
     int    *words
@@ -492,10 +495,10 @@ cdef:
     int vocab_size
     int doc_count
     document* docs
-    matrix *m_vocab  # N*W
-    matrix *m_docs   # KD*N
+    matrix *m_vocab  # LDA/HDP: N*W
+    matrix *m_docs   # LDA: KD*N HDP: Tables*N
       # col.aux => vec_group
-    matrix *m_topic  # K*KD
+    matrix *m_topic  # LDA: K*KD HDP: Topic*Tables
     matrix_mult_view *view_doc_word #m_doc*m_vocab
     matrix_mult_view *view_topic_word #m_topic*m_doc*m_vocab
     sample_buffer buf[MAX_SAMPLE_BUFFER]
@@ -503,7 +506,7 @@ cdef:
   inline matrix_entry* _get_first(vector* vec):
     return <matrix_entry*>vec.store.list.head.next.data
 
-  # consider D=A*(B*C)
+  # consider D=A*(B*C) 
   inline vector* _to_l(matrix_mult_view *v1, matrix_mult_view *v2, vector* vec):
     cdef vector* temp
     temp = mult_view_map_prod_row(v1, vec) # row in (B*C)
@@ -527,7 +530,8 @@ cdef:
       sum += buf[i].prob
       if sum >= coin:
         return buf[i].ptr
-     
+  
+  # for LDA
   int _get_sample_buffer(topic_model*t, vector* col, double alpha, double beta):
     cdef vector *word, *topic_row, *row
     cdef vec_group *group        
@@ -542,7 +546,37 @@ cdef:
           (row.sum+alpha)*(count+beta)/(topic_row.sum+t.vocab_size*beta)
       t.buf[i].ptr = <void*>row
     return group.count
-    
+
+  # for table assignment in HDP
+  int _get_sample_buffer_table(topic_model *t, vector *col, double alpha_table, double beta):
+    cdef vector *word, *topic_row, *row
+    cdef femap *group
+    cdef _ll_item *p
+    cdef int count = 0, value 
+    word = _to_r(t.view_doc_word, t.view_topic_word, col)
+    group = <femap*> col.aux
+    p = group.list.head.next
+    while p:
+      row = <vector*> p.data
+      topic_row = _to_l(t.view_doc_word, t.view_topic_word, row)
+      value = get_matrix_entry(topic_row, word)
+      t.buf[count].prob = \
+          row.sum*(value+beta)/(topic_row.sum+t.vocab_size*beta)
+      t.buf[count].ptr = <void*>row
+      count += 1
+      p = p.next    
+    t.buf[count].prob = alpha_table*1.0/t.vocab_size
+    t.buf[count].ptr = 0
+    count += 1
+    return count
+  
+  # for topic assignment in HDP
+  int _get_sample_buffe_topic(topic_model *t, vector *col, double alpha_topic, double beta):
+    pass
+
+  double _log_posterior_table(vector *topic, vector *table, double beta):
+    pass
+
   void resample_topic_model(topic_model* t, double alpha, double beta):
     cdef _ll_item *p = t.m_docs.cols.head.next
     cdef vector *row, *col
@@ -654,6 +688,11 @@ cdef class FixedTopicModel:
       index += len(col)
       exported.append(this_doc)
     return exported
+
+
+cdef:
+    pass
+
 
 ###################### 
 # unit testing       #  
