@@ -496,9 +496,10 @@ cdef:
     int doc_count
     document* docs
     matrix *m_vocab  # LDA/HDP: N*W
-    matrix *m_docs   # LDA: KD*N HDP: Tables*N
-      # col.aux => vec_group
-    matrix *m_topic  # LDA: K*KD HDP: Topic*Tables
+    matrix *m_docs   # LDA: KD*N, HDP: Tables*N
+      # LDA: col.aux => vec_group
+      # HDP: col.aux => femap
+    matrix *m_topic  # LDA: K*KD, HDP: Topic*Tables
     matrix_mult_view *view_doc_word #m_doc*m_vocab
     matrix_mult_view *view_topic_word #m_topic*m_doc*m_vocab
     sample_buffer buf[MAX_SAMPLE_BUFFER]
@@ -518,6 +519,11 @@ cdef:
     temp = _get_first(mult_view_map_to_right(v1, vec)).col # col in C
     temp = mult_view_map_prod_col(v1, temp) # col in (B*C)
     return mult_view_map_prod_col(v2, temp) # col in D
+
+  inline vector* _to_l_1(matrix_mult_view *v1, vector* vec):
+    cdef vector* temp
+    temp = mult_view_map_prod_col(v1, vec)
+    return temp
 
   void* sample_unnormalized(sample_buffer *buf, int count):
     cdef int i
@@ -571,12 +577,30 @@ cdef:
     return count
   
   # for topic assignment in HDP
-  int _get_sample_buffe_topic(topic_model *t, vector *col, double alpha_topic, double beta):
-    pass
+  int _get_sample_buffe_topic(topic_model *t, vector *col, double log_alpha_topic, double beta):
+    cdef vector *word, *topic_row, *row
+    cdef _ll_item *p
+    cdef int count = 0
+    p = t.m_topic.rows.list.head.next
+    while p:
+      row = <vector*> p.data
+      topic_row = _to_l_1(t.view_topic_word, row)
+      t.buf[count].prob = log(row.sum) + _log_posterior_table(topic_row, col, beta)
+      t.buf[count].ptr = <void*> row
+      count += 1
+      p = p.next
+    t.buf[count].prob = log_alpha_topic + _log_prior_table(col, beta)
+    t.buf[count].ptr = 0
+    count += 1
+    return count
 
+  double _log_prior_table(vector *table, double beta):
+    pass
+    
   double _log_posterior_table(vector *topic, vector *table, double beta):
     pass
 
+  # gibbs iteration of LDA
   void resample_topic_model(topic_model* t, double alpha, double beta):
     cdef _ll_item *p = t.m_docs.cols.head.next
     cdef vector *row, *col
@@ -589,7 +613,12 @@ cdef:
       row = <row_type*> sample_unnormalized(t.buf, count)      
       matrix_update(t.m_docs, +1, row, col)
       p = p.next
-
+  
+  # gibbs iteration of HDP
+  void resample_hdp(topic_model *t, double alpha_topic, double alpha_topic, double beta):
+    cdef _ll_item *p = t.m_docs.cols.head.next
+    
+    
 import random
 
 cdef class FixedTopicModel:
