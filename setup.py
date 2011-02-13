@@ -4,16 +4,27 @@
 # to build c-extension:
 # setup.py build_ext --inplace
 
-import os
 from distutils.core import setup
 from distutils.extension import Extension
 from Cython.Distutils import build_ext
 
+import sys, os
 
+if sys.platform == "linux2" :
+  include_gsl_dir = "/usr/local/include/"
+  lib_gsl_dir = "/usr/local/lib/"
+elif sys.platform == "win32":
+  include_gsl_dir = r"D:\code\gsl\gsl-1.11\include"
+  lib_gsl_dir = r"D:\code\gsl\gsl-1.11\lib-static"
 
 ext_modules = \
   [
-    Extension("llmc.sparse", ["llmc/sparse.pyx", "llmc/hash-table.c"])
+    Extension("llmc.sparse",
+              ["llmc/sparse.pyx",
+               "llmc/hash-table.c"],
+              include_dirs = [include_gsl_dir],
+              library_dirs = [lib_gsl_dir],
+              libraries = ["gsl"] )
   ]
 
 def read(fname):

@@ -12,6 +12,12 @@ from libc.stdlib cimport free, malloc, rand, RAND_MAX
 from libc.math cimport log
 from libc.stdio cimport printf
 
+#cdef extern from "builtin-util.h":
+#  double ln_biased_gamma(double bias, int value)
+
+cdef extern from "gsl/gsl_sf_gamma.h":
+  double gsl_sf_lngamma(double x)
+
 cdef extern from 'hash-table.h':
   struct HashTable:
     pass
@@ -612,24 +618,25 @@ cdef:
       t.buf[count].ptr = <void*> row
       count += 1
       p = p.next
-    t.buf[count].prob = log_alpha_topic+_log_prior_table(_to_r_1(t.view_topic_word,col), beta)
+    t.buf[count].prob = log_alpha_topic+_log_prior_table(t, _to_r_1(t.view_topic_word,col), beta)
     t.buf[count].ptr = NULL
     count += 1
     return count
 
-  inline double ln_prod(int count, double start):
-    return 0
+  inline double ln_factorial(int count, int start, double beta):
+    return gsl_sf_lngamma(beta+count+start)-gsl_sf_lngamma(beta+start)
+    #return ln_biased_gamma(beta, count+start+1)-ln_biased_gamma(beta, start)
     #return lngamma_cached(count+start+1)-lngamma_cached(start)
 
-  double _log_prior_table(vector *table, double beta):
+  double _log_prior_table(topic_model *t, vector *table, double beta):
     cdef _ll_item *p = table.store.list.head.next
     cdef vector *col # column in Tables*Words matrix
     cdef double ret = 0
     while p:
       col = <vector*> p.data
-      ret += ln_prod(get_matrix_entry(table, col), beta)
+      ret += ln_factorial(get_matrix_entry(table, col), 0, beta)
       p = p.next
-    ret -= ln_prod(table.sum, beta)
+    ret -= ln_factorial(table.sum, 0, t.vocab_size*beta)
     return ret
     
   double _log_posterior_table(topic_model *t, vector *topic, vector *table, double beta):
@@ -641,9 +648,9 @@ cdef:
       col = <vector*> p.data
       topic_count = get_matrix_entry(topic, mult_view_map_prod_col(t.view_topic_word, col))
       table_count = get_matrix_entry(table, col)
-      ret += ln_prod(table_count, topic_count+beta)
+      ret += ln_factorial(table_count, topic_count, beta)
       p = p.next
-    ret -= ln_prod(table.sum, topic.sum+beta)
+    ret -= ln_factorial(table.sum, topic.sum, t.vocab_size*beta)
     return ret
 
   inline femap* _get_group(_ll_item *p):
@@ -780,7 +787,6 @@ cdef class FixedTopicModel:
   
   def _set_m_doc(self, _group, cols, rows, debug_m_doc=None):
     cdef void* group = <void*><int> _group
-    #print "%d %d %d" % (len(rows), len(cols), len(debug_m_doc))
     for i, _col in enumerate(cols):
       col = <vector*><int> _col
       col.aux = group     
@@ -818,6 +824,7 @@ cdef class HDPTopicModel(FixedTopicModel):
   def __init__(self, vocab_size, alpha_table, alpha_topic, beta,
                initial_topic=1, initial_table=1):
     self.initialize_model()
+    self.t.m_topic.squeeze_row = 1
     self.alpha_table = alpha_table
     self.log_alpha_topic = log(alpha_topic)
     self.beta = beta    
@@ -1263,7 +1270,18 @@ class TestTopicModel:
     for i in xrange(30):
       model.gibbs_iteration()
  
- 
+  def test_ln_factorial(self):
+    cdef double prod
+    for bias in [0.0, 0.3, 0.9, 5.0]:
+      start = 5
+      for count in xrange(1, 5):
+        prod = 1.0
+        for x in xrange(count):
+          prod *= (start+x+bias)
+        print log(prod)
+        print ln_factorial(count, start, bias)
+        assert_almost_equal(log(prod), ln_factorial(count, start, bias))
+    
   def test_hdp(self):
     vocab_size, alpha_table, alpha_topic, beta = 6, 1.0, 1.0, 0.5
     word_lists = [[0,1,2], [3,4,5], [1,3,5], [0,2,4]] 
