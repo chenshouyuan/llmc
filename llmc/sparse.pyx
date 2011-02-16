@@ -526,17 +526,7 @@ cdef:
     temp = _get_first(mult_view_map_to_right(v1, vec)).col # col in C
     temp = mult_view_map_prod_col(v1, temp) # col in (B*C)
     return mult_view_map_prod_col(v2, temp) # col in D
-
-  inline vector* _to_l_1(matrix_mult_view *v1, vector* vec):
-    cdef vector* temp
-    temp = mult_view_map_prod_col(v1, vec)
-    return temp
-
-  inline vector* _to_r_1(matrix_mult_view *v1, vector* vec):
-    cdef vector* temp
-    temp = mult_view_map_to_right(v1, vec)
-    return temp
-
+  
   void* sample_unnormalized(sample_buffer *buf, int count):
     cdef int i
     cdef double sum = 0
@@ -606,50 +596,53 @@ cdef:
     return count
   
   # for topic assignment in HDP
-  int _get_sample_buffer_topic(topic_model *t, vector *col, double log_alpha_topic, double beta):
+  int _get_sample_buffer_topic(topic_model *t, vector *table, double log_alpha_topic, double beta):
     cdef vector *word, *topic_row, *row
     cdef _ll_item *p
     cdef int count = 0
     p = t.m_topic.rows.head.next
     while p:
       row = <vector*> p.data
-      topic_row = _to_l_1(t.view_topic_word, row)
-      t.buf[count].prob = log(row.sum)+_log_posterior_table(t, topic_row, col, beta)
+      topic_row = mult_view_map_prod_row(t.view_topic_word, row)
+      t.buf[count].prob = log(row.sum)+_log_posterior_table(t, topic_row, table, beta)      
       t.buf[count].ptr = <void*> row
       count += 1
       p = p.next
-    t.buf[count].prob = log_alpha_topic+_log_prior_table(t, _to_r_1(t.view_topic_word,col), beta)
+    t.buf[count].prob = log_alpha_topic+_log_prior_table(t, table, beta)
     t.buf[count].ptr = NULL
     count += 1
     return count
 
   inline double ln_factorial(int count, int start, double beta):
     return gsl_sf_lngamma(beta+count+start)-gsl_sf_lngamma(beta+start)
-    #return ln_biased_gamma(beta, count+start+1)-ln_biased_gamma(beta, start)
-    #return lngamma_cached(count+start+1)-lngamma_cached(start)
 
   double _log_prior_table(topic_model *t, vector *table, double beta):
     cdef _ll_item *p = table.store.list.head.next
-    cdef vector *col # column in Tables*Words matrix
+    cdef vector *col_word # column in Tables*Words matrix
     cdef double ret = 0
     while p:
-      col = <vector*> p.data
-      ret += ln_factorial(get_matrix_entry(table, col), 0, beta)
+      col_word = <vector*> p.data
+      ret += ln_factorial(get_matrix_entry(table, col_word), 0, beta)
       p = p.next
     ret -= ln_factorial(table.sum, 0, t.vocab_size*beta)
     return ret
     
   double _log_posterior_table(topic_model *t, vector *topic, vector *table, double beta):
+    printf("here\n")
     cdef _ll_item *p = table.store.list.head.next
     cdef vector *col # column in Tables*Words matrix
     cdef int topic_count, table_count
     cdef double ret = 0
     while p:
+      printf("start\n")
       col = <vector*> p.data
       topic_count = get_matrix_entry(topic, mult_view_map_prod_col(t.view_topic_word, col))
+      printf("sss")
       table_count = get_matrix_entry(table, col)
+      printf("tt %d %d\n", topic_count, table_count)
       ret += ln_factorial(table_count, topic_count, beta)
       p = p.next
+    printf("%d %d\n", table.sum, topic.sum)
     ret -= ln_factorial(table.sum, topic.sum, t.vocab_size*beta)
     return ret
 
@@ -693,17 +686,19 @@ cdef:
 
   void resample_hdp_tables(topic_model *t, femap* group, double log_alpha_topic, double beta):
     cdef _ll_item *p = group.list.head.next
-    cdef vector *row, *col
+    cdef vector *row_docs, *row_doc_word, *col_topic, *row_topic
     cdef int count
     while p:
-      col = <vector*> p.data
-      row = <vector*> _get_first(col).row
-      matrix_update(t.m_topic, -1, row, col) # m_topic squeeze automatically
-      count = _get_sample_buffer_topic(t, col, log_alpha_topic, beta)
-      row = <row_type*> sample_log_unnormalized(t.buf, count)
-      if row is NULL: # add new topic
-        row = matrix_insert_new_row(t.m_topic)
-      matrix_update(t.m_topic, +1, row, col)
+      row_docs = <vector*> p.data #table
+      row_doc_word = mult_view_map_prod_row(t.view_doc_word, row_docs) #table
+      col_topic = mult_view_map_to_left(t.view_topic_word, row_doc_word) #table
+      row_topic = <vector*> _get_first(col_topic).row #topic
+      matrix_update(t.m_topic, -1, row_topic, col_topic) # m_topic squeeze automatically
+      count = _get_sample_buffer_topic(t, row_doc_word, log_alpha_topic, beta)
+      row_topic = <row_type*> sample_log_unnormalized(t.buf, count)
+      if row_topic is NULL: # add new topic
+        row_topic = matrix_insert_new_row(t.m_topic)
+      matrix_update(t.m_topic, +1, row_topic, col_topic)
       p = p.next
 
 import random
@@ -714,7 +709,7 @@ cdef class FixedTopicModel:
   cdef object _topic_rows
   cdef int    _topic_count
   cdef double alpha, beta
-  cdef object doc_columns
+  cdef object doc_columns, doc_rows
 
   def __init__(self, k, vocab_size, alpha, beta):    
     self.initialize_model()
@@ -741,6 +736,7 @@ cdef class FixedTopicModel:
     prod2 = matrix_new(0,0)
     self.t.view_topic_word = mult_view_new(self.t.m_topic, prod1, prod2)
     self.doc_columns = []
+    self.doc_rows = []
 
   def set_topic_num(self, k):
     self._topic_count = <int> k
@@ -772,7 +768,8 @@ cdef class FixedTopicModel:
       col = mult_view_map_to_left(self.t.view_topic_word, temp)
       matrix_update(self.t.m_topic, +1, topic_row, col)
       group.vec[i] = row
-      i += 1    
+      i += 1
+    self.doc_rows.append(topics)    
     return (topics, <int>group)
 
   def _set_m_vocab(self, word_list):
@@ -824,7 +821,7 @@ cdef class HDPTopicModel(FixedTopicModel):
   def __init__(self, vocab_size, alpha_table, alpha_topic, beta,
                initial_topic=1, initial_table=1):
     self.initialize_model()
-    self.t.m_topic.squeeze_row = 1
+    #self.t.m_topic.squeeze_row = 1
     self.alpha_table = alpha_table
     self.log_alpha_topic = log(alpha_topic)
     self.beta = beta    
@@ -848,6 +845,7 @@ cdef class HDPTopicModel(FixedTopicModel):
         topic_row = <vector*><int>random.choice(self._topic_rows)
       matrix_update(self.t.m_topic, +1, topic_row, col)
       femap_insert(group, <void*>table, <void*>table)
+    self.doc_rows.append(tables)          
     return (tables, <int>group)
   
   def gibbs_iteration(self):
@@ -1278,9 +1276,15 @@ class TestTopicModel:
         prod = 1.0
         for x in xrange(count):
           prod *= (start+x+bias)
-        print log(prod)
-        print ln_factorial(count, start, bias)
         assert_almost_equal(log(prod), ln_factorial(count, start, bias))
+    
+  def ln_factorial_sum(self, start, count, bias):
+    cdef double prod
+    cdef int k
+    for k in range(count):
+      prod += log(bias+k+start)
+    return prod
+    
     
   def test_hdp(self):
     vocab_size, alpha_table, alpha_topic, beta = 6, 1.0, 1.0, 0.5
@@ -1323,9 +1327,13 @@ class TestTopicModel:
 
     cdef vector* col
     cdef vector* row
+    cdef vector *row_topic, *col_topic, *row_m_docs, *row_doc_word
     cdef int _i, _t
-    word_count, table_count = 0 ,0
+    word_count, table_count = 0 , 0
+    table_prod = np.dot(doc_mat, vocab_mat).tocsr()
+    
     for i in xrange(len(word_lists)):
+      temp = """"
       for j in xrange(len(word_lists[i])):
         _col,_word = model.doc_columns[i][j], word_lists[i][j]
         col = <vector*><int>_col
@@ -1340,8 +1348,44 @@ class TestTopicModel:
           truth=doc_mat[table_count+_i,:].sum()*\
                 (prod[_t,_word]+beta)/(prod[_t,:].sum()+vocab_size*beta)
           eq_(<double>truth, <double>model.t.buf[_i].prob)
-        eq_(alpha_table/vocab_size, <double>model.t.buf[initial_table].prob)
+        eq_(alpha_table/vocab_size,  <double>model.t.buf[initial_table].prob)
         matrix_update(model.t.m_docs, +1, row, col)
         doc_mat[table_count+s_table[i][j], word_count] = 1
         word_count += 1
-      table_count += initial_table
+        """
+      prod = np.dot(topic_mat,np.dot(doc_mat, vocab_mat))
+      print "topic"
+      print topic_mat.toarray()
+      print "prod"
+      print prod.toarray()
+      print "table_prod"
+      print table_prod.toarray()
+      for j in xrange(initial_table):
+        _row = model.doc_rows[i][j]
+        row_m_docs = <vector*><int>_row
+        row_doc_word = mult_view_map_prod_row(model.t.view_doc_word, row_m_docs)
+        col_topic = mult_view_map_to_left(model.t.view_topic_word, row_doc_word)
+        row_topic = _get_first(col_topic).row
+        
+        matrix_update(model.t.m_topic, -1, row_topic, col_topic)
+        assert topic_mat[s_topic[i][j], table_count] != 0
+        topic_mat[s_topic[i][j], table_count] = 0
+
+        _get_sample_buffer_topic(model.t, row_doc_word, <double>log(alpha_topic), <double>beta)
+
+        prod = np.dot(topic_mat, np.dot(doc_mat, vocab_mat))
+        print "prod"
+        print prod.toarray()
+        
+        table_dok = table_prod[table_count, :].todok()        
+        for _t in range(initial_topic):
+          truth = 0
+          for _p, _v in table_dok.iteritems():
+            _p, _w = _p #_p = 0, _w: word
+            truth += self.ln_factorial_sum(prod[_t, _w], _v, beta)
+          truth -= self.ln_factorial_sum(prod[_t, :].sum(), table_dok.sum(), beta*vocab_size)
+          print "topic: %d" % _t
+          assert_almost_equal(<double>truth, <double>model.t.buf[_t].prob)
+        matrix_update(model.t.m_topic, -1, row_topic, col_topic)
+        topic_mat[s_topic[i][j], table_count] = 1
+        table_count += 1

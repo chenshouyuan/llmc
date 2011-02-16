@@ -1,4 +1,5 @@
 *.py[dc]
+*.so
 build/
 llmc/sparse.c
 data/topic.*.txt

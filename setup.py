@@ -10,7 +10,7 @@ from Cython.Distutils import build_ext
 
 import sys, os
 
-if sys.platform == "linux2" :
+if sys.platform in ["linux2", "darwin"]:
   include_gsl_dir = "/usr/local/include/"
   lib_gsl_dir = "/usr/local/lib/"
 elif sys.platform == "win32":
