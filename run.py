@@ -1,5 +1,5 @@
 import os, os.path
-from llmc.topic_model import LDARunner
+from llmc.topic_model import LDARunner, HDPRunner
 
 # utilty for parsing input data
 class Corpus:
@@ -59,7 +59,7 @@ class Corpus:
       return (docs, word_count)
 
 
-def run_lda():
+def run_topic_model(mode="LDA"):
   base = os.path.split(__file__)[0]
   abspath = os.path.abspath(base)
   datapath = os.path.join(abspath, 'data')
@@ -73,11 +73,15 @@ def run_lda():
   outputdata = os.path.join(datapath, 'topic.kos.txt')
   stopwords = os.path.join(datapath, 'stopwords.txt')
   corpus = Corpus(vocabdata, traindata, testdata, stopwords)
-  lda = LDARunner(outputdata, corpus.train_docs, corpus.vocab,
-                  k = 50, alpha = 50.0 / 20, beta = 0.1)
-  lda.run()
-  lda.save_result()
+  if mode == "LDA":
+    runner=LDARunner(outputdata, corpus.train_docs, corpus.vocab,
+                     k = 50, alpha = 50.0 / 20, beta = 0.1)
+  else:
+    runner=HDPRunner(outputdata, corpus.train_docs, corpus.vocab,
+                     total_iteration = 10)
+  runner.run()
 
 if __name__ == '__main__':
-  run_lda()
+  #run_topic_model(mode="LDA")
+  run_topic_model(mode="HDP")
 

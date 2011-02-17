@@ -9,11 +9,8 @@
 
 """
 from libc.stdlib cimport free, malloc, rand, RAND_MAX
-from libc.math cimport log
+from libc.math cimport log, exp
 from libc.stdio cimport printf
-
-#cdef extern from "builtin-util.h":
-#  double ln_biased_gamma(double bias, int value)
 
 cdef extern from "gsl/gsl_sf_gamma.h":
   double gsl_sf_lngamma(double x)
@@ -539,8 +536,28 @@ cdef:
       if sum >= coin:
         return buf[i].ptr
 
+  double _log_sum_normalize(sample_buffer *buf, int count):
+    cdef double log_max = 100, max_value=-10000000
+    cdef double log_shift, exp_sum, log_norm
+    cdef int i
+    for i in range(count):
+      if buf[i].prob > max_value:
+        max_value = buf[i].prob
+    log_shift = log_max-log(count+1.0)-max_value
+    exp_sum = 0
+    for i in range(count):
+      exp_sum += exp(buf[i].prob+log_shift)
+    log_norm = log(exp_sum)-log_shift
+    for i in range(count):
+      buf[i].prob -= log_norm
+    return log_norm
+
   void* sample_log_unnormalized(sample_buffer *buf, int count):
-    return <void*>0
+    cdef double log_norm = _log_sum_normalize(buf, count)
+    cdef int i 
+    for i in range(count):
+      buf[i].prob = exp(buf[i].prob)
+    return sample_unnormalized(buf, count)
   
   # for LDA
   int _get_sample_buffer(topic_model*t, vector* col, double alpha, double beta):
@@ -582,7 +599,7 @@ cdef:
     group = <femap*> col.aux
     p = group.list.head.next
     while p:
-      row = <vector*> p.data
+      row = <vector*> p.data     
       topic_row = _to_l(t.view_doc_word, t.view_topic_word, row)
       value = get_matrix_entry(topic_row, word)
       t.buf[count].prob = \
@@ -653,11 +670,12 @@ cdef:
   void resample_hdp(topic_model *t, double alpha_table, double log_alpha_topic, double beta):
     cdef _ll_item *p = t.m_docs.cols.head.next
     while p:
-      p = resample_hdp_docs(t, p, alpha_table, beta)
+      p = resample_hdp_docs(t, p, alpha_table, log_alpha_topic, beta)
       resample_hdp_tables(t, _get_group(p), log_alpha_topic, beta)
       p = p.next
       
-  _ll_item* resample_hdp_docs(topic_model *t, _ll_item *p, double alpha_table, double beta):
+  _ll_item* resample_hdp_docs(topic_model *t, _ll_item *p, 
+                              double alpha_table, double log_alpha_topic, double beta):
     cdef femap* group = NULL    
     cdef vector *row, *col
     cdef int count
@@ -678,26 +696,34 @@ cdef:
       if row is NULL: # add new table
         row = matrix_insert_new_row(t.m_docs)
         femap_insert(group, <void*>row, <void*>row)
+        resample_hdp_table(t, row, log_alpha_topic, beta)
       matrix_update(t.m_docs, +1, row, col)
       prev = p
       p = p.next
     return prev
 
+  vector* resample_hdp_table(topic_model *t, vector* row_docs,\
+                             double log_alpha_topic, double beta):
+    cdef int count
+    cdef vector *row_doc_word, *col_topic, *row_topic
+    row_doc_word = mult_view_map_prod_row(t.view_doc_word, row_docs) #table
+    col_topic = mult_view_map_to_left(t.view_topic_word, row_doc_word) #table
+    if col_topic.sum != 0:
+      row_topic = <vector*> _get_first(col_topic).row #topic      
+      matrix_update(t.m_topic, -1, row_topic, col_topic) # m_topic squeeze automatically    
+    count = _get_sample_buffer_topic(t, row_doc_word, log_alpha_topic, beta)
+    row_topic = <row_type*> sample_log_unnormalized(t.buf, count)
+    if row_topic is NULL: # add new topic
+      row_topic = matrix_insert_new_row(t.m_topic)
+    matrix_update(t.m_topic, +1, row_topic, col_topic)
+
   void resample_hdp_tables(topic_model *t, femap* group, double log_alpha_topic, double beta):
     cdef _ll_item *p = group.list.head.next
-    cdef vector *row_docs, *row_doc_word, *col_topic, *row_topic
+    cdef vector *row_docs
     cdef int count
     while p:
       row_docs = <vector*> p.data #table
-      row_doc_word = mult_view_map_prod_row(t.view_doc_word, row_docs) #table
-      col_topic = mult_view_map_to_left(t.view_topic_word, row_doc_word) #table
-      row_topic = <vector*> _get_first(col_topic).row #topic
-      matrix_update(t.m_topic, -1, row_topic, col_topic) # m_topic squeeze automatically
-      count = _get_sample_buffer_topic(t, row_doc_word, log_alpha_topic, beta)
-      row_topic = <row_type*> sample_log_unnormalized(t.buf, count)
-      if row_topic is NULL: # add new topic
-        row_topic = matrix_insert_new_row(t.m_topic)
-      matrix_update(t.m_topic, +1, row_topic, col_topic)
+      resample_hdp_table(t, row_docs, log_alpha_topic, beta)
       p = p.next
 
 import random
@@ -812,20 +838,25 @@ cdef class FixedTopicModel:
       exported.append(this_doc)
     return exported
 
+  def export_topic(self):
+    return  _to_scipy_matrix(<int>self.t.view_topic_word.prod).tocsr()  
 
 cdef class HDPTopicModel(FixedTopicModel):
   cdef double alpha_table
   cdef double log_alpha_topic
   cdef int initial_topic, initial_table
+  cdef object doc_groups
+
   def __init__(self, vocab_size, alpha_table, alpha_topic, beta,
                initial_topic=1, initial_table=1):
     self.initialize_model()
-    #self.t.m_topic.squeeze_row = 1
+    self.t.m_topic.squeeze_row = 1
     self.alpha_table = alpha_table
     self.log_alpha_topic = log(alpha_topic)
     self.beta = beta    
     self.initial_topic = initial_topic
     self.initial_table = initial_table
+    self.doc_groups = []
     if not vocab_size is None:
       self.set_vocab_size(vocab_size)
     self.set_topic_num(initial_topic)
@@ -845,10 +876,17 @@ cdef class HDPTopicModel(FixedTopicModel):
       matrix_update(self.t.m_topic, +1, topic_row, col)
       femap_insert(group, <void*>table, <void*>table)
     self.doc_rows.append(tables)          
+    self.doc_groups.append(<int>group)
     return (tables, <int>group)
-  
+ 
+  def topic_count(self):
+    return self.t.m_topic.row_count
+
+  def table_count(self):
+    return self.t.m_docs.row_count
+
   def gibbs_iteration(self):
-    resample_hdp(self.t, self.alpha_table, self.log_alpha_topic, beta)
+    resample_hdp(self.t, self.alpha_table, self.log_alpha_topic, self.beta)
 
 ###################### 
 # unit testing       #  
@@ -1331,7 +1369,9 @@ class TestTopicModel:
     cdef int _i, _t
     word_count, table_count = 0 , 0
     table_prod = np.dot(doc_mat, vocab_mat).tocsr()
-    
+      
+    model.t.m_topic.squeeze_row = 0
+
     for i in xrange(len(word_lists)):
       for j in xrange(len(word_lists[i])):
         _col,_word = model.doc_columns[i][j], word_lists[i][j]
@@ -1380,3 +1420,8 @@ class TestTopicModel:
         matrix_update(model.t.m_topic, +1, row_topic, col_topic)
         topic_mat[s_topic[i][j], table_count] = 1        
         table_count += 1
+
+    model.t.m_topic.squeeze_row = 1
+    for i in xrange(30):
+      model.gibbs_iteration()
+
