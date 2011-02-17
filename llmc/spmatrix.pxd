@@ -11,7 +11,7 @@ cdef:
   struct _linked_list:
     _ll_item *head, *tail
 
-# Fast enumerable hash map
+# fast enumerable hash map
 cdef:
   struct femap:
     HashTable *table
@@ -23,6 +23,7 @@ cdef:
   femap* femap_new()
   void femap_delete(femap* f)
 
+# matrix structures
 cdef:
   struct vector:
     int sum
@@ -62,8 +63,8 @@ cdef:
 
 cdef void matrix_update(matrix* m, int delta, row_type* row, col_type *col)
 
+# incremental maintainence of matrix multiplication
 cdef:
-  # incremental maintainence of matrix multiplication
   struct matrix_mult_view:
     matrix *left, *right, *prod
     HashTable *right_row_map, *left_col_map

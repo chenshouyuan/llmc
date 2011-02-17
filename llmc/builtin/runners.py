@@ -1,5 +1,5 @@
-from sparse import FixedTopicModel, HDPTopicModel
-from sampler import BaseSampler
+from topicmodel import FixedTopicModel, HDPTopicModel
+from llmc.sampler import BaseSampler
 import operator
 
 def topic_statistic_export(topic_freq, vocab, output_path, max_topic = 10):
@@ -23,26 +23,19 @@ def save_topic_matrix(model, vocab_list, output_path):
 
 class LDARunner:
   def __init__(self, output_path, docs,
-      vocab, k = 20, alpha = 0.1, beta = 0.1):
+      vocab, topic_count = 20, alpha = 0.1, beta = 0.1,
+      total_iteration=1000):
     self.output_path = output_path
-    self.docs, self.vocab = docs, vocab
-    self.k, self.alpha, self.beta = k, alpha, beta
-    self.model = FixedTopicModel(k, len(vocab), alpha, beta)
+    self.vocab = vocab
+    self.k, self.alpha, self.beta = topic_count, alpha, beta
+    self.model = FixedTopicModel(topic_count, len(vocab), alpha, beta)
     for doc in docs:
       self.model.add_new_document(doc)
-    self.sampler = BaseSampler(self.model)
+    self.sampler = BaseSampler(self.model, total_iteration)
 
   def run(self):
     self.sampler.inference()
     save_topic_matrix(self.model, self.vocab, self.output_path)
-
-  def save_result(self):
-    exported = self.model.export_assignment()
-    topic_freq = [dict() for x in xrange(self.k)]
-    for assign, word_list in zip(exported, self.docs):
-      for topic, word in zip(assign, word_list):
-        topic_freq[topic][word] = topic_freq[topic].get(word,0) + 1
-    topic_statistic_export(topic_freq, self.vocab, self.output_path)
 
 def _hdp_show_statistics(model):
   print "topics: %d, tables: %d" % (model.topic_count(), model.table_count())
@@ -52,7 +45,7 @@ class HDPRunner(LDARunner):
                alpha_table=1.0, alpha_topic=1.0, beta=0.5,
                initial_topic=1, initial_table=1,
                total_iteration=1000):
-    self.output_path, self.docs, self.vocab = output_path,docs,vocab
+    self.output_path,  self.vocab = output_path, vocab
     self.model = HDPTopicModel(len(vocab),
                    alpha_table, alpha_topic, beta,
                    initial_topic, initial_table)

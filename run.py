@@ -58,8 +58,7 @@ class Corpus:
         docs[i] = word_list
       return (docs, word_count)
 
-
-def run_topic_model(mode="LDA"):
+def _get_corpus(tag = 'kos'):
   base = os.path.split(__file__)[0]
   abspath = os.path.abspath(base)
   datapath = os.path.join(abspath, 'data')
@@ -73,15 +72,51 @@ def run_topic_model(mode="LDA"):
   outputdata = os.path.join(datapath, 'topic.kos.txt')
   stopwords = os.path.join(datapath, 'stopwords.txt')
   corpus = Corpus(vocabdata, traindata, testdata, stopwords)
-  if mode == "LDA":
-    runner=LDARunner(outputdata, corpus.train_docs, corpus.vocab,
-                     k = 50, alpha = 50.0 / 20, beta = 0.1)
-  else:
-    runner=HDPRunner(outputdata, corpus.train_docs, corpus.vocab,
-                     total_iteration = 1000)
+  return outputdata, corpus
+
+def run_lda(args):
+  outputdata, corpus = _get_corpus()
+  runner=LDARunner(outputdata, corpus.train_docs, corpus.vocab, **args)
   runner.run()
 
-if __name__ == '__main__':
-  #run_topic_model(mode="LDA")
-  run_topic_model(mode="HDP")
+def run_hdp(args):
+  outputdata, corpus = _get_corpus()
+  runner=HDPRunner(outputdata, corpus.train_docs, corpus.vocab, **args)
+  runner.run()
 
+def run_profile(args):
+  import pstats, cProfile
+  outputdata, corpus = _get_corpus()
+  runner=HDPRunner(outputdata, corpus.train_docs, corpus.vocab, total_iteration=3)
+  cProfile.runctx('runner.run()', globals(), locals(), "Profile.prof")
+  s = pstats.Stats("Profile.prof")
+  s.strip_dirs().sort_stats("time").print_stats()
+
+if __name__ == '__main__':
+  import argparse
+
+  parser = argparse.ArgumentParser(prog='LLMC Builtin Models')
+  sub = parser.add_subparsers()
+
+  p = sub.add_parser('lda')
+  p.set_defaults(function=run_lda)
+  p.add_argument('--topic_count', action='store', type=int, default=20)
+  p.add_argument('--alpha', action='store', type=float, default=50.0/5)
+  p.add_argument('--beta', action='store', type=float, default=0.05)
+
+  p = sub.add_parser('hdp')
+  p.set_defaults(function=run_hdp)
+  p.add_argument('--alpha_table', action='store', type=float, default=1.0)
+  p.add_argument('--alpha_topic', action='store', type=float, default=1.0)
+  p.add_argument('--beta', action='store', type=float, default=5.0)
+
+  p = sub.add_parser('profile')
+  p.set_defaults(function=run_profile)
+
+  parser.add_argument('--total_iteration', '--iter', dest='total_iteration',
+                      action='store', type=int, default=1000)
+
+  args = parser.parse_args()
+  arg_dict = args.__dict__.copy()
+  arg_dict.pop('function')
+  args.function(arg_dict)

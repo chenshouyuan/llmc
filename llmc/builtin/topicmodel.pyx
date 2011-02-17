@@ -1,3 +1,5 @@
+# cython: profile=True
+
 from llmc.spmatrix cimport *
 from llmc.spmatrix import *
 
@@ -237,7 +239,7 @@ cdef:
     row_doc_word = mult_view_map_prod_row(t.view_doc_word, row_docs) #table
     col_topic = mult_view_map_to_left(t.view_topic_word, row_doc_word) #table
     if col_topic.sum != 0:
-      row_topic = <vector*> _get_first(col_topic).row #topic      
+      row_topic = <vector*> _get_first(col_topic).row #topic     
       matrix_update(t.m_topic, -1, row_topic, col_topic) # m_topic squeeze automatically    
     count = _get_sample_buffer_topic(t, row_doc_word, log_alpha_topic, beta)
     row_topic = <row_type*> sample_log_unnormalized(t.buf, count)

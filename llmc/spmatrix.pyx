@@ -1,3 +1,5 @@
+# cython: profile=True
+
 """
   Sparse Matrix Utiltities
     1) _NO_ random access
@@ -239,7 +241,6 @@ cdef:
     m.callbacks[m.callback_count] = cb
     m.callback_count += 1
 
-
   matrix* matrix_new_dry():
     cdef matrix* m = <matrix*>malloc(sizeof(matrix))    
     m.row_count = 0
@@ -273,6 +274,14 @@ cdef:
 
   void matrix_remove_row(matrix *m, row_type *row):
     cdef int i
+    cdef _ll_item *p
+    cdef matrix_entry *entry
+    if row.sum != 0:
+      p = row.store.list.head.next
+      while p:
+        entry = <matrix_entry*>p.data
+        matrix_update(m, -entry.value, row, entry.col)
+        p = p.next
     for i in range(m.callback_count):
       if m.callbacks[i].remove_row:
         m.callbacks[i].remove_row(m.callbacks[i].ptr, row)    
@@ -282,6 +291,14 @@ cdef:
 
   void matrix_remove_col(matrix *m, col_type *col):
     cdef int i
+    cdef _ll_item *p
+    cdef matrix_entry *entry    
+    if col.sum != 0:
+      p = col.store.list.head.next
+      while p:
+        entry = <matrix_entry*>p.data
+        matrix_update(m, -entry.value, entry.row, col)
+        p = p.next    
     for i in range(m.callback_count):
       if m.callbacks[i].remove_col:
         m.callbacks[i].remove_col(m.callbacks[i].ptr, col)       
@@ -322,7 +339,11 @@ cdef:
     cdef matrix_mult_view *view = <matrix_mult_view*> ptr
     cdef vector* prod_row      
     cdef vector* prod_col = <vector*>hash_table_lookup(view.right_col_map, <void*>col)
+    if prod_col is NULL:
+      return    
     cdef vector* col_left = <vector*>hash_table_lookup(view.right_row_map, <void*>row)
+    if col_left is NULL:
+      return        
     cdef _ll_item *p = col_left.store.list.head.next    
     cdef matrix_entry* entry 
     while p:
@@ -334,8 +355,12 @@ cdef:
   void cb_mult_update_left(void *ptr, int delta, row_type *row, col_type *col):
     cdef matrix_mult_view *view = <matrix_mult_view*> ptr
     cdef vector* prod_col 
-    cdef vector* prod_row = <vector*>hash_table_lookup(view.left_row_map, <void*>row)        
+    cdef vector* prod_row = <vector*>hash_table_lookup(view.left_row_map, <void*>row)
+    if prod_row is NULL:
+      return
     cdef vector* row_right = <vector*>hash_table_lookup(view.left_col_map, <void*>col)
+    if row_right is NULL:
+      return 
     cdef _ll_item *p = row_right.store.list.head.next    
     cdef matrix_entry* entry 
     while p:
@@ -782,6 +807,10 @@ class TestMatrix:
     fr = fr[0:1, (0,2)]
     mp = scipy.sparse.dok_matrix(np.dot(fl, fr))
     self._assert_equal(mp)
+    self._m = <int>l
+    self._assert_equal(scipy.sparse.dok_matrix(fl))
+    self._m = <int>r
+    self._assert_equal(scipy.sparse.dok_matrix(fr))
 
     mult_view_delete(view)    
     matrix_delete(l)
@@ -792,6 +821,16 @@ class TestMatrix:
 
   def _assert_equal(self, mat):
     cdef matrix* m = <matrix*><int> self._m
+    cdef vector *row, *col
+    rows = to_data_array(<int>m.rows)
+    for i, _row in enumerate(rows):
+      row = <vector*><int> _row
+      eq_(row.sum, mat[i,:].sum())
+    cols = to_data_array(<int>m.cols)
+    for i, _col in enumerate(cols):
+      col = <vector*><int> _col
+      eq_(col.sum, mat[:,i].sum())
+
     mat_reverse = to_scipy_matrix(<int>self._m)
     _assert_matrix_equal(mat_reverse, mat)
     eq_( _get_nnz(to_data_array(<int>m.cols)), mat.getnnz())

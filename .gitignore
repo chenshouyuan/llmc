@@ -1,5 +1,6 @@
 *.py[dc]
 *.so
+*.prof
 build/
 llmc/spmatrix.c
 llmc/builtin/topicmodel.c
