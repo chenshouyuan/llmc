@@ -1,4 +1,4 @@
-# cython: profile=True
+# cython: profile=False
 
 from llmc.spmatrix cimport *
 from llmc.spmatrix import *
