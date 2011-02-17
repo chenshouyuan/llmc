@@ -18,6 +18,10 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
  */
 
+
+/* modified to remove overhead of custom hash function */
+
+
 /**
  * @file hash-table.h
  *
@@ -131,17 +135,12 @@ typedef void (*HashTableValueFreeFunc)(HashTableValue value);
 /**
  * Create a new hash table.
  *
- * @param hash_func            Function used to generate hash keys for the 
- *                             keys used in the table.
- * @param equal_func           Function used to test keys used in the table 
- *                             for equality.
  * @return                     A new hash table structure, or NULL if it 
  *                             was not possible to allocate the new hash
  *                             table.
  */
 
-HashTable *hash_table_new(HashTableHashFunc hash_func, 
-                          HashTableEqualFunc equal_func);
+HashTable *hash_table_new();
 
 /**
  * Destroy a hash table.

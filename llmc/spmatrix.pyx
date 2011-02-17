@@ -15,12 +15,6 @@ from libc.math cimport log, exp
 from libc.stdio cimport printf
 from cutils cimport *
 
-cdef:
-  unsigned int pointer_hash(void *location):
-    return <unsigned int><unsigned long>location
-  int pointer_equal(void *l1, void*l2):
-    return 1 if l1==l2 else 0
-
 # utility data structures
 cdef:
   # array lists
@@ -120,7 +114,7 @@ cdef:
       
   femap* femap_new():
     cdef femap* new = <femap*>malloc(sizeof(femap))
-    new.table = hash_table_new(pointer_hash, pointer_equal)
+    new.table = hash_table_new()
     new.list = ll_new()
     return new
 
@@ -172,7 +166,7 @@ cdef:
     femap_remove(entry.col.store, <void*>entry.row)
     free(entry)
 
-  int get_matrix_entry(row_type *row, col_type *col):
+  inline int get_matrix_entry(row_type *row, col_type *col):
     cdef matrix_entry *p = <matrix_entry*>femap_lookup(col.store, <void*>row)
     if not p:
       return 0
@@ -323,16 +317,16 @@ cdef:
     HashTable *right_row_map, *left_col_map
     HashTable *right_col_map, *left_row_map
 
-  vector* mult_view_map_to_left(matrix_mult_view *view, row_type *row):
+  inline vector* mult_view_map_to_left(matrix_mult_view *view, row_type *row):
     return <vector*>hash_table_lookup(view.right_row_map, row)
 
-  vector* mult_view_map_to_right(matrix_mult_view *view, col_type *col):
+  inline vector* mult_view_map_to_right(matrix_mult_view *view, col_type *col):
     return <vector*>hash_table_lookup(view.left_col_map, col)
 
-  vector* mult_view_map_prod_row(matrix_mult_view *view, row_type *row):
+  inline vector* mult_view_map_prod_row(matrix_mult_view *view, row_type *row):
     return <vector*>hash_table_lookup(view.left_row_map, row)
 
-  vector* mult_view_map_prod_col(matrix_mult_view *view, col_type *col):
+  inline vector* mult_view_map_prod_col(matrix_mult_view *view, col_type *col):
     return <vector*>hash_table_lookup(view.right_col_map, col)
 
   void cb_mult_update_right(void *ptr, int delta, row_type *row, col_type *col):
@@ -448,10 +442,10 @@ cdef:
     view.right = right
     view.prod = prod
 
-    view.left_col_map = hash_table_new(pointer_hash, pointer_equal)
-    view.left_row_map = hash_table_new(pointer_hash, pointer_equal)
-    view.right_col_map = hash_table_new(pointer_hash, pointer_equal)
-    view.right_row_map = hash_table_new(pointer_hash, pointer_equal)
+    view.left_col_map = hash_table_new()
+    view.left_row_map = hash_table_new()
+    view.right_col_map = hash_table_new()
+    view.right_row_map = hash_table_new()
 
     cb = <update_callback*>malloc(sizeof(update_callback))
     cb.update = cb_mult_update_left
