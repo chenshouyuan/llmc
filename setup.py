@@ -19,8 +19,11 @@ elif sys.platform == "win32":
 
 ext_modules = \
   [
-    Extension("llmc.sparse",
-              ["llmc/sparse.pyx",
+    Extension("llmc.spmatrix",
+              ["llmc/spmatrix.pyx",
+               "llmc/hash-table.c"]),
+    Extension("llmc.builtin.topicmodel",
+              ["llmc/builtin/topicmodel.pyx",
                "llmc/hash-table.c"],
               include_dirs = [include_gsl_dir],
               library_dirs = [lib_gsl_dir],

@@ -1,6 +1,7 @@
 *.py[dc]
 *.so
 build/
-llmc/sparse.c
+llmc/spmatrix.c
+llmc/builtin/topicmodel.c
 data/topic.*.txt
 

@@ -1,5 +1,5 @@
 import os, os.path
-from llmc.topic_model import LDARunner, HDPRunner
+from llmc.builtin.runners import LDARunner, HDPRunner
 
 # utilty for parsing input data
 class Corpus:
@@ -78,7 +78,7 @@ def run_topic_model(mode="LDA"):
                      k = 50, alpha = 50.0 / 20, beta = 0.1)
   else:
     runner=HDPRunner(outputdata, corpus.train_docs, corpus.vocab,
-                     total_iteration = 10)
+                     total_iteration = 1000)
   runner.run()
 
 if __name__ == '__main__':
