@@ -620,30 +620,29 @@ cdef:
     cdef _ll_item *p = table.store.list.head.next
     cdef vector *col_word # column in Tables*Words matrix
     cdef double ret = 0
+    cdef matrix_entry* entry
     while p:
-      col_word = <vector*> p.data
+      entry = <matrix_entry*> p.data
+      col_word = entry.col
       ret += ln_factorial(get_matrix_entry(table, col_word), 0, beta)
       p = p.next
     ret -= ln_factorial(table.sum, 0, t.vocab_size*beta)
     return ret
     
-  double _log_posterior_table(topic_model *t, vector *topic, vector *table, double beta):
-    printf("here\n")
+  double _log_posterior_table(topic_model *t, vector *row_topic_word, vector *table, double beta):
     cdef _ll_item *p = table.store.list.head.next
     cdef vector *col # column in Tables*Words matrix
+    cdef matrix_entry* entry
     cdef int topic_count, table_count
     cdef double ret = 0
     while p:
-      printf("start\n")
-      col = <vector*> p.data
-      topic_count = get_matrix_entry(topic, mult_view_map_prod_col(t.view_topic_word, col))
-      printf("sss")
+      entry = <matrix_entry*> p.data
+      col = entry.col
+      topic_count = get_matrix_entry(row_topic_word, mult_view_map_prod_col(t.view_topic_word, col))
       table_count = get_matrix_entry(table, col)
-      printf("tt %d %d\n", topic_count, table_count)
       ret += ln_factorial(table_count, topic_count, beta)
       p = p.next
-    printf("%d %d\n", table.sum, topic.sum)
-    ret -= ln_factorial(table.sum, topic.sum, t.vocab_size*beta)
+    ret -= ln_factorial(table.sum, row_topic_word.sum, t.vocab_size*beta)
     return ret
 
   inline femap* _get_group(_ll_item *p):
@@ -1011,6 +1010,7 @@ cpdef _get_nnz(col_p):
 
 import scipy.sparse
 import numpy as np
+import math
 
 def _assert_matrix_equal(m1, m2):
   eq_(m1.shape, m2.shape)
@@ -1271,15 +1271,15 @@ class TestTopicModel:
   def test_ln_factorial(self):
     cdef double prod
     for bias in [0.0, 0.3, 0.9, 5.0]:
-      start = 5
-      for count in xrange(1, 5):
-        prod = 1.0
-        for x in xrange(count):
-          prod *= (start+x+bias)
-        assert_almost_equal(log(prod), ln_factorial(count, start, bias))
+      for start in [5,10,50]:
+        for count in xrange(1, 5):
+          prod = 1.0
+          for x in xrange(count):
+            prod *= (start+x+bias)
+          assert_almost_equal(log(prod), ln_factorial(count, start, bias))
     
   def ln_factorial_sum(self, start, count, bias):
-    cdef double prod
+    cdef double prod = 0
     cdef int k
     for k in range(count):
       prod += log(bias+k+start)
@@ -1333,7 +1333,6 @@ class TestTopicModel:
     table_prod = np.dot(doc_mat, vocab_mat).tocsr()
     
     for i in xrange(len(word_lists)):
-      temp = """"
       for j in xrange(len(word_lists[i])):
         _col,_word = model.doc_columns[i][j], word_lists[i][j]
         col = <vector*><int>_col
@@ -1351,22 +1350,15 @@ class TestTopicModel:
         eq_(alpha_table/vocab_size,  <double>model.t.buf[initial_table].prob)
         matrix_update(model.t.m_docs, +1, row, col)
         doc_mat[table_count+s_table[i][j], word_count] = 1
-        word_count += 1
-        """
+        word_count += 1       
       prod = np.dot(topic_mat,np.dot(doc_mat, vocab_mat))
-      print "topic"
-      print topic_mat.toarray()
-      print "prod"
-      print prod.toarray()
-      print "table_prod"
-      print table_prod.toarray()
       for j in xrange(initial_table):
         _row = model.doc_rows[i][j]
         row_m_docs = <vector*><int>_row
         row_doc_word = mult_view_map_prod_row(model.t.view_doc_word, row_m_docs)
         col_topic = mult_view_map_to_left(model.t.view_topic_word, row_doc_word)
-        row_topic = _get_first(col_topic).row
-        
+        row_topic = _get_first(col_topic).row       
+
         matrix_update(model.t.m_topic, -1, row_topic, col_topic)
         assert topic_mat[s_topic[i][j], table_count] != 0
         topic_mat[s_topic[i][j], table_count] = 0
@@ -1374,18 +1366,17 @@ class TestTopicModel:
         _get_sample_buffer_topic(model.t, row_doc_word, <double>log(alpha_topic), <double>beta)
 
         prod = np.dot(topic_mat, np.dot(doc_mat, vocab_mat))
-        print "prod"
-        print prod.toarray()
-        
         table_dok = table_prod[table_count, :].todok()        
         for _t in range(initial_topic):
-          truth = 0
+          truth = log(topic_mat[_t, :].sum())
           for _p, _v in table_dok.iteritems():
-            _p, _w = _p #_p = 0, _w: word
+            _w = _p[1]
             truth += self.ln_factorial_sum(prod[_t, _w], _v, beta)
           truth -= self.ln_factorial_sum(prod[_t, :].sum(), table_dok.sum(), beta*vocab_size)
-          print "topic: %d" % _t
-          assert_almost_equal(<double>truth, <double>model.t.buf[_t].prob)
-        matrix_update(model.t.m_topic, -1, row_topic, col_topic)
-        topic_mat[s_topic[i][j], table_count] = 1
+          if topic_mat[_t,:].sum() == 0:
+            assert math.isinf(float(<double>model.t.buf[_t].prob))
+          else:
+            assert_almost_equal(<double>truth, <double>model.t.buf[_t].prob)
+        matrix_update(model.t.m_topic, +1, row_topic, col_topic)
+        topic_mat[s_topic[i][j], table_count] = 1        
         table_count += 1
