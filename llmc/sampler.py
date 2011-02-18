@@ -1,10 +1,8 @@
 import sys
 class BaseSampler:
-  def __init__(self, model, total = 5, dot_progress = False, callback = None):
+  def __init__(self, model, total = 5, progress='iter', callback = None):
     self.model = model
-    self.total = total
-    self.dot_progress = dot_progress
-    self.callback = callback
+    self.total, self.progress, self.callback = total, progress, callback
 
   def inference(self):
     for i in xrange(self.total):
@@ -15,7 +13,7 @@ class BaseSampler:
     print ""
 
   def show_progress(self, i):
-    if self.dot_progress:
+    if self.progress=='dot':
       step = self.total / 20
       if i % step == 0:
         sys.stdout.write('.')

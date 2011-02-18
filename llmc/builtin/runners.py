@@ -55,6 +55,10 @@ class HDPRunner(LDARunner):
 
 
 from mixture import DPSMM
+
+def _dpm_show(model):
+  print model.cluster_count()
+
 class DPSMMRunner:
   def __init__(self, points, dim=2, alpha=1.0,
                sigma=1.0, sigma_prior=15.0,
@@ -62,7 +66,10 @@ class DPSMMRunner:
     self.model = DPSMM(dim=dim, alpha=alpha, sigma=sigma, sigma_prior=sigma_prior)
     for p in points:
       self.model.add_ob(p)
-    self.sampler = BaseSampler(self.model, total_iteration)
+    print self.model.cluster_count()
+    self.sampler = BaseSampler(self.model, total=total_iteration,\
+                               progress='dot')
 
   def run(self):
     self.sampler.inference()
+    return self.model.export_assignment()

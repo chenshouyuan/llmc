@@ -24,7 +24,7 @@ cdef:
   simple_mixture_model* ssm_new(double sigma_prior,double sigma):
     cdef simple_mixture_model *ssm = <simple_mixture_model*>malloc(sizeof(simple_mixture_model))
     ssm.mp = matrix_new(0, 0)
-    ssm.mc = matrix_new(0, 0)
+    ssm.mc = matrix_new(1, 0)
     cdef matrix *prod = matrix_new(0, 0)
     ssm.view = mult_view_new(ssm.mc, ssm.mp, prod)
     ssm.sigma_prior = sigma_prior
@@ -93,11 +93,12 @@ cdef:
     m.buf[count].prob = log_alpha+_log_prior_ssm(m, row_mp)
     m.buf[count].ptr = NULL
     count += 1
+    return count
 
   void resample_dpsmm(simple_mixture_model *m, double log_alpha):
     cdef _ll_item *p = m.mc.cols.head.next
     cdef vector *col_mc, *row_mc
-    cdef int count
+    cdef int count, i
     while p:
       col_mc = <vector*> p.data
       row_mc = _get_first(col_mc).row
@@ -141,14 +142,24 @@ cdef class DPSMM:
       matrix_update(self.m.mp, value, mp_row, mp_col)
     cdef vector *mc_row   
     if debug_row is None:
-      _row = random.choose(self.mc_rows)
+      _row = random.choice(self.mc_rows)
     else:
       _row = self.mc_rows[debug_row]
     mc_row = <vector*><int> _row
     matrix_update(self.m.mc, 1.0, mc_row, mc_col)
 
   def gibbs_iteration(self):
-    resample_dpsmm(self.m, log_alpha)
+    resample_dpsmm(self.m, self.log_alpha)
+
+  def export_assignment(self):
+    mat = to_scipy_matrix(<int>self.m.mc)
+    assign = dict()
+    for row,col in mat.iterkeys():
+      assign[col]=row
+    return assign
+  
+  def cluster_count(self):
+    return self.m.mc.row_count
 
 ################
 # unit testing #
@@ -221,13 +232,13 @@ class TestDPSSM:
                          var=1.0/(1.0/(m.sigma*m.sigma)+count)+1,
                          x=self.points[i])
         assert_almost_equal(truth, m.buf[k].prob)
+        print m.buf[k].prob
         eq_(<int>m.buf[k].ptr, model.mc_rows[k])
       truth = model.log_alpha+\
           _log_gaussian(np.zeros((self.dim)), m.sigma_prior*m.sigma_prior+1,\
                         self.points[i])
+      print m.buf[self.cluster_count].prob
       assert_almost_equal(m.buf[self.cluster_count].prob, truth)
       eq_(<int>m.buf[self.cluster_count].ptr, 0)
       matrix_update(m.mc, +1, row, col)
       mc_mat[self.assign[i], i] += 1  
-
-  
