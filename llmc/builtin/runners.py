@@ -54,3 +54,15 @@ class HDPRunner(LDARunner):
     self.sampler = BaseSampler(self.model,total_iteration,callback=_hdp_show_statistics)
 
 
+from mixture import DPSMM
+class DPSMMRunner:
+  def __init__(self, points, dim=2, alpha=1.0,
+               sigma=1.0, sigma_prior=15.0,
+               total_iteration=5000):
+    self.model = DPSMM(dim=dim, alpha=alpha, sigma=sigma, sigma_prior=sigma_prior)
+    for p in points:
+      self.model.add_ob(p)
+    self.sampler = BaseSampler(self.model, total_iteration)
+
+  def run(self):
+    self.sampler.inference()

@@ -24,8 +24,8 @@ cdef:
   simple_mixture_model* ssm_new(double sigma_prior,double sigma):
     cdef simple_mixture_model *ssm = <simple_mixture_model*>malloc(sizeof(simple_mixture_model))
     ssm.mp = matrix_new(0, 0)
-    ssm.mc = matrix_new(1, 0)
-    cdef matrix *prod = matrix_new(1, 0)
+    ssm.mc = matrix_new(0, 0)
+    cdef matrix *prod = matrix_new(0, 0)
     ssm.view = mult_view_new(ssm.mc, ssm.mp, prod)
     ssm.sigma_prior = sigma_prior
     ssm.sigma = sigma
@@ -65,6 +65,8 @@ cdef:
   double _log_posterior_ssm(simple_mixture_model *m,\
       entry_t count, vector *row_prod, vector *row_mp):
     cdef double mu[MAX_DIM], ob[MAX_DIM]
+    if count == 0:
+      return 0    
     _extract_cord(m.dim, mu, m.view.prod, row_prod)
     _extract_cord(m.dim, ob, m.mp, row_mp)
     cdef int i
@@ -109,7 +111,7 @@ cdef:
 
 import random
 
-cdef class DPSSM:
+cdef class DPSMM:
   cdef simple_mixture_model *m
   cdef object mp_cols, mc_rows, mp_rows
   cdef double log_alpha
@@ -151,8 +153,10 @@ cdef class DPSSM:
 ################
 # unit testing #
 ################
+import unittest
 from nose.tools import *
 import numpy as np
+from numpy.random import multivariate_normal
 
 def _sq(x):
   return np.dot(x,x)
@@ -160,62 +164,70 @@ def _sq(x):
 def _log_gaussian(mean, var, x):
   return -0.5*log(var)-_sq(x-mean)/(2*var)
 
-cdef class TestDPSSM:
-  cdef DPSSM model
-
-  def setUp(self):
-    self.dim, self.cluster_count = 2, 3
-    self.model = DPSSM(dim=self.dim, initial_clusters=self.cluster_count)    
-    self.points = [[1,1], [2,3], [4,5]]
-    self.assign = [random.randint(0, self.cluster_count-1) for p in self.points]
-    for p,c in zip(self.points, self.assign):
-      self.model.add_ob(p, debug_row = c)
-    
-  def tearDown(self):
-    ssm_free(self.model.m)
+class TestDPSSM:
+#  def tearDown(self):
+#    ssm_free(self.model.m)
   
-  def test_extract_cord(self):   
-    cdef simple_mixture_model *m = self.model.m    
+  def _test_extract_cord(self, DPSMM model):   
+    cdef simple_mixture_model *m = model.m    
     cdef double buf[2]
-    eq_(len(self.points), self.model.mp_rows)
+    eq_(len(self.points), len(model.mp_rows))
     for i, p in enumerate(self.points):
-      _extract_cord(self.dim, buf, m.mp, <vector*><int>self.m.mp_rows[i])
+      _extract_cord(self.dim, buf, m.mp, <vector*><int>model.mp_rows[i])
       for k in xrange(self.dim):
         eq_(p[k], buf[k])
 
-  def test_cluster_assign(self):
-    mat = to_scipy_matrix(<int>self.model.m.mc)
+  def _test_cluster_assign(self, DPSMM model):
+    mat = to_scipy_matrix(<int>model.m.mc)
     for row,col in mat.iterkeys():
       eq_(row, self.assign[col])
 
   def test_sampler_buffer(self):    
-    cdef simple_mixture_model *m = self.model.m
+    cdef DPSMM model    
+    self.dim, self.cluster_count = 2, 3
+    model = DPSMM(dim=self.dim, initial_clusters=self.cluster_count)    
+    #self.points = [[5,5], [2,3], [4,5], [10, 20], [40,50]]
+    self.points = [multivariate_normal(np.zeros(self.dim), np.identity(self.dim))\
+                   for x in xrange(10)]
+    self.assign = [random.randint(0, self.cluster_count-1) for p in self.points]
+    for p,c in zip(self.points, self.assign):
+      model.add_ob(p, debug_row = c)
+ 
+    self._test_cluster_assign(model)
+    self._test_extract_cord(model)
+
+    cdef simple_mixture_model *m = model.m
     mc_mat = to_scipy_matrix(<int>m.mc)
     mp_mat = to_scipy_matrix(<int>m.mp)
+
     mc_cols = to_data_array(<int>m.mc.cols)
+    m.mc.squeeze_row = 0
+
     for i in xrange(len(self.points)):
-      _col,_row = mc_cols[i], self.model.mc_rows[self.assign[i]]
+      _col,_row = mc_cols[i], model.mc_rows[self.assign[i]]
       col = <vector*><int>_col
       row = <vector*><int>_row
-      matrix_update(m.mc, -1, col, row)
+      matrix_update(m.mc, -1, row, col)
       eq_(mc_mat[self.assign[i], i], 1)
       mc_mat[self.assign[i], i] -= 1
       prod = np.dot(mc_mat, mp_mat).toarray()
-      _get_sample_buffer_dpssm(m, col, self.model.log_alpha)
+      _get_sample_buffer_dpssm(m, col, model.log_alpha)
       for k in xrange(self.cluster_count):
-        count = mc_mat[k].sum()
+        count = mc_mat[k, :].sum()
+        if count == 0:
+          continue
         truth = log(count) \
           +_log_gaussian(mean=prod[k,:]/count,\
-                         var=1.0/(1.0/(self.sigma+self.sigma)+count)+1,
+                         var=1.0/(1.0/(m.sigma*m.sigma)+count)+1,
                          x=self.points[i])
         assert_almost_equal(truth, m.buf[k].prob)
-        eq_(<int>m.buf[k].ptr, self.model.mc_rows[k])
-      truth = self.model.log_alpha+\
-          _log_gaussian(np.zeros((1, self.dim)), self.sigma_prior*self.sigma_prior+1,\
+        eq_(<int>m.buf[k].ptr, model.mc_rows[k])
+      truth = model.log_alpha+\
+          _log_gaussian(np.zeros((self.dim)), m.sigma_prior*m.sigma_prior+1,\
                         self.points[i])
       assert_almost_equal(m.buf[self.cluster_count].prob, truth)
       eq_(<int>m.buf[self.cluster_count].ptr, 0)
-      matrix_update(m.mc, +1, col, row)
+      matrix_update(m.mc, +1, row, col)
       mc_mat[self.assign[i], i] += 1  
 
   
