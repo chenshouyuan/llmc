@@ -12,4 +12,3 @@ cdef extern from 'hash-table.h':
   HashTableValue hash_table_lookup(HashTable *hash_table, 
                                    HashTableKey key)
   int hash_table_remove(HashTable *hash_table, HashTableKey key)
-

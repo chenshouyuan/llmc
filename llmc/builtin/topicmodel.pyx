@@ -2,6 +2,7 @@
 
 from llmc.spmatrix cimport *
 from llmc.spmatrix import *
+from llmc.modelutil cimport *
 
 from libc.stdlib cimport free, malloc, rand, RAND_MAX
 from libc.math cimport log, exp
@@ -10,13 +11,7 @@ from libc.stdio cimport printf
 cdef extern from "gsl/gsl_sf_gamma.h":
   double gsl_sf_lngamma(double x)
 
-DEF MAX_SAMPLE_BUFFER = 2000
-
 cdef:
-  struct sample_buffer:
-    double prob
-    void  *ptr
-
   struct vec_group:
     int    count
     vector **vec
@@ -36,11 +31,8 @@ cdef:
     matrix *m_topic  # LDA: K*KD, HDP: Topic*Tables
     matrix_mult_view *view_doc_word #m_doc*m_vocab
     matrix_mult_view *view_topic_word #m_topic*m_doc*m_vocab
-    sample_buffer buf[MAX_SAMPLE_BUFFER]
+    sample_buffer buf[20000]
   
-  inline matrix_entry* _get_first(vector* vec):
-    return <matrix_entry*>vec.store.list.head.next.data
-
   # consider D=A*(B*C) 
   inline vector* _to_l(matrix_mult_view *v1, matrix_mult_view *v2, vector* vec):
     cdef vector* temp
@@ -54,54 +46,20 @@ cdef:
     temp = mult_view_map_prod_col(v1, temp) # col in (B*C)
     return mult_view_map_prod_col(v2, temp) # col in D
   
-  void* sample_unnormalized(sample_buffer *buf, int count):
-    cdef int i
-    cdef double sum = 0
-    for i in range(count):
-      sum += buf[i].prob
-    cdef double coin = (rand()+0.0)/RAND_MAX*sum
-    sum = 0
-    for i in range(count):
-      sum += buf[i].prob
-      if sum >= coin:
-        return buf[i].ptr
-
-  double _log_sum_normalize(sample_buffer *buf, int count):
-    cdef double log_max = 100, max_value=-10000000
-    cdef double log_shift, exp_sum, log_norm
-    cdef int i
-    for i in range(count):
-      if buf[i].prob > max_value:
-        max_value = buf[i].prob
-    log_shift = log_max-log(count+1.0)-max_value
-    exp_sum = 0
-    for i in range(count):
-      exp_sum += exp(buf[i].prob+log_shift)
-    log_norm = log(exp_sum)-log_shift
-    for i in range(count):
-      buf[i].prob -= log_norm
-    return log_norm
-
-  void* sample_log_unnormalized(sample_buffer *buf, int count):
-    cdef double log_norm = _log_sum_normalize(buf, count)
-    cdef int i 
-    for i in range(count):
-      buf[i].prob = exp(buf[i].prob)
-    return sample_unnormalized(buf, count)
-  
   # for LDA
   int _get_sample_buffer(topic_model*t, vector* col, double alpha, double beta):
     cdef vector *word, *topic_row, *row
     cdef vec_group *group        
-    cdef int i, count
+    cdef int i
+    cdef entry_t value
     word = _to_r(t.view_doc_word, t.view_topic_word, col)
     group = <vec_group*> col.aux
     for i in range(group.count):
       row = group.vec[i]    
       topic_row = _to_l(t.view_doc_word, t.view_topic_word, row)
-      count = get_matrix_entry(topic_row, word)
+      value = get_matrix_entry(topic_row, word)
       t.buf[i].prob = \
-          (row.sum+alpha)*(count+beta)/(topic_row.sum+t.vocab_size*beta)
+          (row.sum+alpha)*(value+beta)/(topic_row.sum+t.vocab_size*beta)
       t.buf[i].ptr = <void*>row
     return group.count
 
@@ -124,7 +82,8 @@ cdef:
     cdef vector *word, *topic_row, *row
     cdef femap *group
     cdef _ll_item *p
-    cdef int count = 0, value 
+    cdef int count = 0
+    cdef entry_t value 
     word = _to_r(t.view_doc_word, t.view_topic_word, col)
     group = <femap*> col.aux
     p = group.list.head.next
@@ -160,7 +119,7 @@ cdef:
     count += 1
     return count
 
-  inline double ln_factorial(int count, int start, double beta):
+  inline double ln_factorial(double count, double start, double beta):
     return gsl_sf_lngamma(beta+count+start)-gsl_sf_lngamma(beta+start)
 
   double _log_prior_table(topic_model *t, vector *table, double beta):
@@ -180,7 +139,7 @@ cdef:
     cdef _ll_item *p = table.store.list.head.next
     cdef vector *col # column in Tables*Words matrix
     cdef matrix_entry* entry
-    cdef int topic_count, table_count
+    cdef entry_t topic_count, table_count
     cdef double ret = 0
     while p:
       entry = <matrix_entry*> p.data

@@ -126,7 +126,7 @@ cdef:
 # matrix data structure
 cdef:
   struct vector:
-    int sum
+    entry_t sum
     femap *store
     _ll_item *link      
     vector* parent # !=0 if is a vector in product matrix
@@ -148,10 +148,10 @@ cdef:
   #ctypedef vector row_type
   
   struct matrix_entry:
-    int value  
+    entry_t value  
     vector *row, *col
     
-  matrix_entry* matrix_entry_new(int value,
+  matrix_entry* matrix_entry_new(entry_t value,
              row_type *row, col_type *col):   
     cdef matrix_entry* new = <matrix_entry*>malloc(sizeof(matrix_entry))
     new.value = value
@@ -166,14 +166,14 @@ cdef:
     femap_remove(entry.col.store, <void*>entry.row)
     free(entry)
 
-  inline int get_matrix_entry(row_type *row, col_type *col):
+  inline entry_t get_matrix_entry(row_type *row, col_type *col):
     cdef matrix_entry *p = <matrix_entry*>femap_lookup(col.store, <void*>row)
     if not p:
       return 0
     else:
       return p.value 
 
-  int update_matrix_entry(int delta, row_type *row, col_type *col):
+  int update_matrix_entry(entry_t delta, row_type *row, col_type *col):
     row.sum += delta
     col.sum += delta   
     cdef matrix_entry *p = \
@@ -190,7 +190,7 @@ cdef:
    
   struct update_callback:
     void *ptr
-    void (*update)(void*, int, row_type*, col_type*)
+    void (*update)(void*, entry_t, row_type*, col_type*)
     void (*insert_new_row)(void*, row_type*)
     void (*insert_new_col)(void*, col_type*)
     void (*remove_row)(void*, row_type*)
@@ -198,7 +198,7 @@ cdef:
 
   struct matrix:
     _linked_list *rows, *cols    
-    int row_count, col_count, nnz
+    entry_t row_count, col_count, nnz
     bint squeeze_row, squeeze_col
     int callback_count
     update_callback *callbacks[10]
@@ -217,7 +217,7 @@ cdef:
 
   vector* matrix_insert_new_row(matrix *m):
     cdef vector* new_row = matrix_insert_new_row_dry(m)
-    cdef int i
+    cdef int i 
     for i in range(m.callback_count):
       if m.callbacks[i].insert_new_row:
         m.callbacks[i].insert_new_row(m.callbacks[i].ptr, new_row)
@@ -300,7 +300,7 @@ cdef:
     vector_delete(col)    
     ll_remove(m.cols, col.link)
 
-  void matrix_update(matrix* m, int delta, row_type* row, col_type *col):
+  void matrix_update(matrix* m, entry_t delta, row_type* row, col_type *col):
     cdef int res = update_matrix_entry(delta, row, col)
     cdef int i
     m.nnz += res
@@ -329,7 +329,7 @@ cdef:
   inline vector* mult_view_map_prod_col(matrix_mult_view *view, col_type *col):
     return <vector*>hash_table_lookup(view.right_col_map, col)
 
-  void cb_mult_update_right(void *ptr, int delta, row_type *row, col_type *col):
+  void cb_mult_update_right(void *ptr, entry_t delta, row_type *row, col_type *col):
     cdef matrix_mult_view *view = <matrix_mult_view*> ptr
     cdef vector* prod_row      
     cdef vector* prod_col = <vector*>hash_table_lookup(view.right_col_map, <void*>col)
@@ -346,7 +346,7 @@ cdef:
       matrix_update(view.prod, delta*entry.value, prod_row, prod_col)
       p = p.next
 
-  void cb_mult_update_left(void *ptr, int delta, row_type *row, col_type *col):
+  void cb_mult_update_left(void *ptr, entry_t delta, row_type *row, col_type *col):
     cdef matrix_mult_view *view = <matrix_mult_view*> ptr
     cdef vector* prod_col 
     cdef vector* prod_row = <vector*>hash_table_lookup(view.left_row_map, <void*>row)
@@ -848,3 +848,6 @@ def assert_2d_list(list1, list2):
     for a,b in zip(l1,l2):
       eq_(a,b)
 
+def test_stuff():
+  print "A"
+  assert 1==0

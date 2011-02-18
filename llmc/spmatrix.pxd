@@ -23,10 +23,11 @@ cdef:
   femap* femap_new()
   void femap_delete(femap* f)
 
+ctypedef double entry_t
 # matrix structures
 cdef:
   struct vector:
-    int sum
+    entry_t sum
     femap *store
     _ll_item *link      
     vector* parent # !=0 if is a vector in product matrix
@@ -36,13 +37,13 @@ cdef:
   ctypedef vector row_type  
   
   struct matrix_entry:
-    int value  
+    entry_t value  
     vector *row, *col  
 
-  matrix_entry* matrix_entry_new(int value, row_type *row, col_type *col)
+  matrix_entry* matrix_entry_new(entry_t value, row_type *row, col_type *col)
   void matrix_entry_delete(matrix_entry *entry)
-  int get_matrix_entry(row_type *row, col_type *col)
-  int update_matrix_entry(int delta, row_type *row, col_type *col)
+  entry_t get_matrix_entry(row_type *row, col_type *col)
+  int update_matrix_entry(entry_t delta, row_type *row, col_type *col)
 
   struct update_callback
 
@@ -61,7 +62,7 @@ cdef:
   void matrix_remove_row(matrix *m, row_type *row)
   void matrix_remove_col(matrix *m, col_type *col)  
 
-cdef void matrix_update(matrix* m, int delta, row_type* row, col_type *col)
+cdef void matrix_update(matrix* m, entry_t delta, row_type* row, col_type *col)
 
 # incremental maintainence of matrix multiplication
 cdef:

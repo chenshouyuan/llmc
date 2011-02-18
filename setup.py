@@ -27,7 +27,10 @@ ext_modules = \
                "llmc/hash-table.c"],
               include_dirs = [include_gsl_dir],
               library_dirs = [lib_gsl_dir],
-              libraries = ["gsl"] )
+              libraries = ["gsl"] ),
+    Extension("llmc.builtin.mixture",
+              ["llmc/builtin/mixture.pyx",
+               "llmc/hash-table.c"])
   ]
 
 def read(fname):

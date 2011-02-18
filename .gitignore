@@ -3,6 +3,6 @@
 *.prof
 build/
 llmc/spmatrix.c
-llmc/builtin/topicmodel.c
+llmc/builtin/*.c
 data/topic.*.txt
 
