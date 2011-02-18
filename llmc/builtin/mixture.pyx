@@ -232,12 +232,10 @@ class TestDPSSM:
                          var=1.0/(1.0/(m.sigma*m.sigma)+count)+1,
                          x=self.points[i])
         assert_almost_equal(truth, m.buf[k].prob)
-        print m.buf[k].prob
         eq_(<int>m.buf[k].ptr, model.mc_rows[k])
       truth = model.log_alpha+\
           _log_gaussian(np.zeros((self.dim)), m.sigma_prior*m.sigma_prior+1,\
                         self.points[i])
-      print m.buf[self.cluster_count].prob
       assert_almost_equal(m.buf[self.cluster_count].prob, truth)
       eq_(<int>m.buf[self.cluster_count].ptr, 0)
       matrix_update(m.mc, +1, row, col)
