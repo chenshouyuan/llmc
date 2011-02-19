@@ -1,1 +1,1 @@
-from llmc.builtin.topicmodel import TestTopicModel
+from llmc.model.topicmodel import TestTopicModel

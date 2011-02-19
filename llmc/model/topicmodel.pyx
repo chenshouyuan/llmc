@@ -1,7 +1,7 @@
 # cython: profile=False
 from llmc.spmatrix cimport *
 from llmc.spmatrix import *
-from llmc.modelutil cimport *
+from llmc.sampleutil cimport *
 
 from libc.stdlib cimport free, malloc, rand, RAND_MAX
 from libc.math cimport log, exp

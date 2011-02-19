@@ -1,2 +1,2 @@
-from llmc.builtin.mixture import TestDPSSM
+from llmc.model.mixture import TestDPSSM
 

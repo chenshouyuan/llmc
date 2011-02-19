@@ -80,3 +80,6 @@ cdef:
   void mult_view_delete(matrix_mult_view* view)
 
 
+cdef inline matrix_entry* _get_first(vector* vec):
+  return <matrix_entry*>vec.store.list.head.next.data
+

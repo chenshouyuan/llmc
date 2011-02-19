@@ -56,14 +56,14 @@ ext_modules = \
     Extension("llmc.spmatrix",
               ["llmc/spmatrix.pyx",
                "llmc/lib/hash-table.c"]),
-    Extension("llmc.builtin.topicmodel",
-              ["llmc/builtin/topicmodel.pyx",
+    Extension("llmc.model.topicmodel",
+              ["llmc/model/topicmodel.pyx",
                "llmc/lib/hash-table.c"],
               include_dirs = [include_gsl_dir],
               library_dirs = [lib_gsl_dir],
               libraries = ["gsl"] ),
-    Extension("llmc.builtin.mixture",
-              ["llmc/builtin/mixture.pyx",
+    Extension("llmc.model.mixture",
+              ["llmc/model/mixture.pyx",
                "llmc/lib/hash-table.c"])
   ]
 

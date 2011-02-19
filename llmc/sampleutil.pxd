@@ -2,9 +2,6 @@ from spmatrix cimport *
 from libc.math cimport log, exp
 from libc.stdlib cimport rand, RAND_MAX
 
-cdef inline matrix_entry* _get_first(vector* vec):
-  return <matrix_entry*>vec.store.list.head.next.data
-
 cdef:
   struct sample_buffer:
     double prob

@@ -1,6 +1,6 @@
 import os, os.path
-from llmc.builtin.runners import LDARunner, HDPRunner, DPSMMRunner
-from llmc.builtin.util import Corpus, ContinousTimeGaussianGenerator
+from llmc.model.runners import LDARunner, HDPRunner, DPSMMRunner
+from llmc.model.util import Corpus, ContinousTimeGaussianGenerator
 
 def _get_corpus(tag = 'kos'):
   base = os.path.split(__file__)[0]
@@ -29,7 +29,7 @@ def run_hdp(args):
   runner.run()
 
 def run_dpsmm(args):
-  from llmc.builtin.util import plot_mode, vi_distance
+  from llmc.model.util import plot_mode, vi_distance
   gen = ContinousTimeGaussianGenerator(time_len=1,
         sigma1=args['sigma_prior'], sigma2=args['sigma'])
   gen.generate()
