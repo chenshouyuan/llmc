@@ -10,10 +10,11 @@
     6) squeeze out empty rows
 
 """
+from lib cimport *
+
 from libc.stdlib cimport free, malloc, rand, RAND_MAX
 from libc.math cimport log, exp
 from libc.stdio cimport printf
-from cutils cimport *
 
 # utility data structures
 cdef:

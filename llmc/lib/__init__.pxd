@@ -1,4 +1,4 @@
-cdef extern from 'hash-table.h':
+cdef extern from "lib/hash-table.h":
   struct HashTable:
     pass
   ctypedef void *HashTableKey

@@ -1,8 +1,11 @@
 *.py[dc]
 *.so
 *.prof
+*.c
+
+!llmc/lib/*.c
 build/
-llmc/spmatrix.c
-llmc/builtin/*.c
+tags
+
 data/topic.*.txt
 

@@ -1,5 +1,4 @@
 # cython: profile=False
-
 from llmc.spmatrix cimport *
 from llmc.spmatrix import *
 from llmc.modelutil cimport *
