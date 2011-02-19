@@ -21,17 +21,17 @@ cdef:
     double sigma_prior, sigma 
     sample_buffer buf[200000]
 
-  simple_mixture_model* ssm_new(double sigma_prior,double sigma):
-    cdef simple_mixture_model *ssm = <simple_mixture_model*>malloc(sizeof(simple_mixture_model))
-    ssm.mp = matrix_new(0, 0)
-    ssm.mc = matrix_new(1, 0)
+  simple_mixture_model* smm_new(double sigma_prior,double sigma):
+    cdef simple_mixture_model *smm = <simple_mixture_model*>malloc(sizeof(simple_mixture_model))
+    smm.mp = matrix_new(0, 0)
+    smm.mc = matrix_new(1, 0)
     cdef matrix *prod = matrix_new(0, 0)
-    ssm.view = mult_view_new(ssm.mc, ssm.mp, prod)
-    ssm.sigma_prior = sigma_prior
-    ssm.sigma = sigma
-    return ssm
+    smm.view = mult_view_new(smm.mc, smm.mp, prod)
+    smm.sigma_prior = sigma_prior
+    smm.sigma = sigma
+    return smm
   
-  void ssm_free(simple_mixture_model *m):
+  void smm_free(simple_mixture_model *m):
     matrix_delete(m.mp)
     matrix_delete(m.mc)
     matrix_delete(m.view.prod)
@@ -53,7 +53,7 @@ cdef:
       sum += (mu[i]-ob[i])*(mu[i]-ob[i])
     return -0.5*log(var)-sum/(2*var)    
   
-  double _log_prior_ssm(simple_mixture_model *m, vector *row_mp):
+  double _log_prior_smm(simple_mixture_model *m, vector *row_mp):
     cdef double ob[MAX_DIM]
     cdef double zeros[MAX_DIM]
     for i in range(m.dim):
@@ -62,7 +62,7 @@ cdef:
     cdef double var = m.sigma_prior*m.sigma_prior+1
     return _loglike_normal_simple(m.dim, zeros, var, ob)
 
-  double _log_posterior_ssm(simple_mixture_model *m,\
+  double _log_posterior_smm(simple_mixture_model *m,\
       entry_t count, vector *row_prod, vector *row_mp):
     cdef double mu[MAX_DIM], ob[MAX_DIM]
     if count == 0:
@@ -75,7 +75,7 @@ cdef:
     cdef double mu_var = 1.0/(1.0/(m.sigma*m.sigma)+count)
     return _loglike_normal_simple(m.dim, mu, mu_var+1, ob)
 
-  int _get_sample_buffer_dpssm(simple_mixture_model *m, vector *col_mc, double log_alpha):
+  int _get_sample_buffer_dpsmm(simple_mixture_model *m, vector *col_mc, double log_alpha):
     cdef _ll_item *p = m.mc.rows.head.next
     cdef vector *row_mc, *row_prod, *row_mp
     cdef entry_t value
@@ -86,11 +86,11 @@ cdef:
       value = get_matrix_entry(row_mc, col_mc)
       row_prod = mult_view_map_prod_row(m.view, row_mc)
       m.buf[count].prob = log(row_mc.sum)+\
-        _log_posterior_ssm(m, row_mc.sum, row_prod, row_mp)
+        _log_posterior_smm(m, row_mc.sum, row_prod, row_mp)
       m.buf[count].ptr = row_mc
       count += 1
       p = p.next
-    m.buf[count].prob = log_alpha+_log_prior_ssm(m, row_mp)
+    m.buf[count].prob = log_alpha+_log_prior_smm(m, row_mp)
     m.buf[count].ptr = NULL
     count += 1
     return count
@@ -103,7 +103,7 @@ cdef:
       col_mc = <vector*> p.data
       row_mc = _get_first(col_mc).row
       matrix_update(m.mc, -1, row_mc, col_mc)
-      count = _get_sample_buffer_dpssm(m, col_mc, log_alpha)
+      count = _get_sample_buffer_dpsmm(m, col_mc, log_alpha)
       row_mc = <vector*>sample_log_unnormalized(m.buf, count)
       if row_mc is NULL:
         row_mc = matrix_insert_new_row(m.mc)
@@ -118,7 +118,7 @@ cdef class DPSMM:
   cdef double log_alpha
 
   def __init__(self, dim=2, initial_clusters=1, sigma_prior=15.0, sigma=1.0, alpha=1.0):
-    self.m = ssm_new(sigma_prior, sigma)
+    self.m = smm_new(sigma_prior, sigma)
     self.log_alpha = log(alpha)
     self.set_dim(dim)
     self.set_cluster(initial_clusters)
@@ -175,9 +175,9 @@ def _sq(x):
 def _log_gaussian(mean, var, x):
   return -0.5*log(var)-_sq(x-mean)/(2*var)
 
-class TestDPSSM:
+class TestDPSMM:
 #  def tearDown(self):
-#    ssm_free(self.model.m)
+#    smm_free(self.model.m)
   
   def _test_extract_cord(self, DPSMM model):   
     cdef simple_mixture_model *m = model.m    
@@ -222,7 +222,7 @@ class TestDPSSM:
       eq_(mc_mat[self.assign[i], i], 1)
       mc_mat[self.assign[i], i] -= 1
       prod = np.dot(mc_mat, mp_mat).toarray()
-      _get_sample_buffer_dpssm(m, col, model.log_alpha)
+      _get_sample_buffer_dpsmm(m, col, model.log_alpha)
       for k in xrange(self.cluster_count):
         count = mc_mat[k, :].sum()
         if count == 0:
