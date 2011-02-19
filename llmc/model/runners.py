@@ -45,14 +45,13 @@ class HDPRunner(LDARunner):
                alpha_table=1.0, alpha_topic=1.0, beta=0.5,
                initial_topic=1, initial_table=1,
                total_iteration=1000):
-    self.output_path,  self.vocab = output_path, vocab
+    self.output_path, self.vocab = output_path, vocab
     self.model = HDPTopicModel(len(vocab),
                    alpha_table, alpha_topic, beta,
                    initial_topic, initial_table)
     for doc in docs:
       self.model.add_new_document(doc)
     self.sampler = BaseSampler(self.model,total_iteration,callback=_hdp_show_statistics)
-
 
 from mixture import DPSMM
 
@@ -72,4 +71,5 @@ class DPSMMRunner:
 
   def run(self):
     self.sampler.inference()
-    return self.model.export_assignment()
+    out_assign = self.model.export_assignment()
+    return [out_assign[k] for k in xrange(len(out_assign))]

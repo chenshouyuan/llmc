@@ -31,11 +31,14 @@ def run_hdp(args):
 def run_dpsmm(args):
   from llmc.model.util import plot_mode, vi_distance
   gen = ContinousTimeGaussianGenerator(time_len=1,
-        sigma1=args['sigma_prior'], sigma2=args['sigma'])
+        sigma1=args['sigma_prior'], sigma2=args['sigma'],
+        initial_topic=args['n_cluster'],
+        data_per_time=args['n_data'])
   gen.generate()
+  for x in ['n_cluster', 'n_data']:
+    args.pop(x)
   runner = DPSMMRunner(points=gen.data[0], **args)
   out_assign = runner.run() # is a dict
-  out_assign = [out_assign[k] for k in xrange(len(out_assign))]
   print "variation information %lf" % vi_distance(gen.assign[0], out_assign)
   plot_mode(gen.assign[0], out_assign, gen.data[0])
 
@@ -47,35 +50,43 @@ def run_profile(args):
   s = pstats.Stats("Profile.prof")
   s.strip_dirs().sort_stats("time").print_stats()
 
+
+
 if __name__ == '__main__':
   import argparse
+
+  def _sub_parser(sub, name, function, help = ""):
+    p = sub.add_parser(name, help=help)
+    p.set_defaults(function=function)
+    # adding common arguments
+    p.add_argument('--total-iteration', '--iter',
+                    help = 'number of iteration used by Gibbs sampler',
+                    type=int, default=1000)
+    return p
+
 
   parser = argparse.ArgumentParser(prog='LLMC Builtin Models')
   sub = parser.add_subparsers()
 
-  p = sub.add_parser('lda')
-  p.set_defaults(function=run_lda)
-  p.add_argument('--topic_count', action='store', type=int, default=20)
-  p.add_argument('--alpha', action='store', type=float, default=50.0/5)
-  p.add_argument('--beta', action='store', type=float, default=0.05)
+  p = _sub_parser(sub, 'lda', run_lda, help="Run Latent Dirichlet Allocation")
+  p.add_argument('--topic-count', type=int, default=20)
+  p.add_argument('--alpha', type=float, default=50.0/5)
+  p.add_argument('--beta', type=float, default=0.05)
 
-  p = sub.add_parser('hdp')
-  p.set_defaults(function=run_hdp)
-  p.add_argument('--alpha_table', action='store', type=float, default=1.0)
-  p.add_argument('--alpha_topic', action='store', type=float, default=1.0)
-  p.add_argument('--beta', action='store', type=float, default=5.0)
+  p = _sub_parser(sub, 'hdp', run_hdp, help="Run Hierarchical Dirichlet Process")
+  p.add_argument('--alpha-table', type=float, default=1.0)
+  p.add_argument('--alpha-topic', type=float, default=1.0)
+  p.add_argument('--beta', type=float, default=1.0)
 
-  p = sub.add_parser('dpm')
-  p.set_defaults(function=run_dpsmm)
-  p.add_argument('--alpha', action='store', type=float, default=1.0)
-  p.add_argument('--sigma_prior', action='store', type=float, default=15.0)
-  p.add_argument('--sigma', action='store', type=float, default=1.0)
+  p = _sub_parser(sub, 'dpm', run_dpsmm,
+                  help="Run Dirichlet Process Mixture (Spherical Gaussian Mixture)")
+  p.add_argument('--alpha', type=float, default=1.0)
+  p.add_argument('--sigma-prior', type=float, default=15.0)
+  p.add_argument('--sigma', type=float, default=1.0)
+  p.add_argument('--n-cluster', type=int, default=2)
+  p.add_argument('--n-data', type=int, default=100)
 
-  p = sub.add_parser('profile')
-  p.set_defaults(function=run_profile)
-
-  parser.add_argument('--total_iteration', '--iter', dest='total_iteration',
-                      action='store', type=int, default=1000)
+  p = _sub_parser(sub, 'profile', run_profile, help="Profiling against HDP model")
 
   args = parser.parse_args()
   arg_dict = args.__dict__.copy()

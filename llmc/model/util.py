@@ -133,28 +133,6 @@ class ContinousTimeGaussianGenerator:
   def gen_times(self):
     self.times = list(xrange(self.time_len))
 
-  def serialize_data(self, out_file):
-    ser_data = GaussianPB.InputData()
-    for t in xrange(self.time_len):
-      data = ser_data.data.add()
-      data.time = self.times[t]
-      for datum in self.data[t]:
-        point = data.point.add()
-        point.x1 = datum[0]
-        point.x2 = datum[1]
-    with open(out_file, 'wb') as f:
-      f.write(ser_data.SerializeToString())
-
-  def serialize_conf(self, conf_file, ddp_config = None):
-    conf_data = GaussianPB.Config()
-    conf_data.sigma_prior = self.sigma1
-    conf_data.sigma = self.sigma2
-    conf_data.delta = self.model_delta
-    if ddp_config:
-      ddp_config.gen(conf_data.config)
-    with open(conf_file, 'wb') as f:
-      f.write(conf_data.SerializeToString())
-
 import matplotlib.pyplot as plt
 _cname = \
 ["#DC1433","#00FFFF","#00008B","#008B8B","#B8860B","#A9A9A9","#006400","#BDB76B",
