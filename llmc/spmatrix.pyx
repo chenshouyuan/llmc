@@ -835,7 +835,6 @@ class TestMatrix:
                   <vector*><int> self.row_p[row],
                   <vector*><int> self.col_p[col])
 
-
 def assert_mat_equal(_m, mat):
   cdef matrix* m = <matrix*><int> _m
   mat_reverse = to_scipy_matrix(<int>_m)
@@ -849,6 +848,3 @@ def assert_2d_list(list1, list2):
     for a,b in zip(l1,l2):
       eq_(a,b)
 
-def test_stuff():
-  print "A"
-  assert 1==0

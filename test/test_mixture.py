@@ -2,7 +2,7 @@ from llmc.model.mixture import TestDPSMM
 
 from nose.tools import *
 
-def test_smm_runner_synset():
+def _test_smm_runner_synset():
   from llmc.model.util import ContinousTimeGaussianGenerator as GG
   from llmc.model.util import vi_distance
   from llmc.model.runners import DPSMMRunner

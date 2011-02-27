@@ -50,22 +50,22 @@ class CleanCommand(Command):
       except:
         pass
 
+libs = {"gsl": (include_gsl_dir, lib_gsl_dir)}
+srcs = ["llmc/lib/hash-table.c"]
+exts = [("llmc.spmatrix", "llmc/spmatrix.pyx", []),
+        ("llmc.py_spmatrix", "llmc/py_spmatrix.pyx", []),
+        ("llmc.model.topicmodel", "llmc/model/topicmodel.pyx", ["gsl"]),
+        ("llmc.model.mixture", "llmc/model/mixture.pyx", [])]
 
-ext_modules = \
-  [
-    Extension("llmc.spmatrix",
-              ["llmc/spmatrix.pyx",
-               "llmc/lib/hash-table.c"]),
-    Extension("llmc.model.topicmodel",
-              ["llmc/model/topicmodel.pyx",
-               "llmc/lib/hash-table.c"],
-              include_dirs = [include_gsl_dir],
-              library_dirs = [lib_gsl_dir],
-              libraries = ["gsl"] ),
-    Extension("llmc.model.mixture",
-              ["llmc/model/mixture.pyx",
-               "llmc/lib/hash-table.c"])
-  ]
+ext_modules = []
+for mod, pyx, lib in exts:
+  include_dirs = [libs[l][0] for l in lib]
+  library_dirs = [libs[l][1] for l in lib]
+  ext = Extension(mod, [pyx]+srcs,
+                  include_dirs=include_dirs,
+                  library_dirs=library_dirs,
+                  libraries = lib)
+  ext_modules.append(ext)
 
 def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
