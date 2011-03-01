@@ -22,10 +22,13 @@ def test_entries():
   array, dok, matrix = create_from_scipy()
   check_attribs(array, dok, matrix)
 
+  rows = matrix.getrows()
+  cols = matrix.getcols()
+
   #  .. testing __getitems__ ..
   for position, value in dok.iteritems():
     row, col = position
-    eq_(matrix[row,col], value)
+    eq_(matrix[rows[row],cols[col]], value)
   eq_mat(matrix, dok)
 
   # .. testing __setitems__ ..
@@ -33,7 +36,7 @@ def test_entries():
   dok = dok+plus
   for position, value in plus.iteritems():
     row, col = position
-    matrix[row, col] += value
+    matrix[rows[row], cols[col]] += value
   eq_mat(matrix, dok)
 
   # .. testing update ..
@@ -41,7 +44,7 @@ def test_entries():
   dok = dok+plus
   for position, value in plus.iteritems():
     row, col = position
-    matrix.update(row,col,value)
+    matrix.update(rows[row],cols[col],value)
   eq_mat(matrix, dok)
 
 def test_append_remove():
@@ -49,18 +52,21 @@ def test_append_remove():
   rows_to_remove = [2,4,7]
   cols_to_remove = [1,3,5]
 
+  rows = matrix.getrows()
+  cols = matrix.getcols()
+
   oarray = array
   for row in rows_to_remove:
-    matrix.remove_row(row)
-    matrix.squeeze()
+    matrix.remove_row(rows[row])
+    rows.pop(row)
     array = np.delete(array, row, 0)
     dok = dok_matrix(array)
     eq_mat(matrix, dok)
     check_iters(matrix, dok)
 
   for col in cols_to_remove:
-    matrix.remove_col(col)
-    matrix.squeeze()
+    matrix.remove_col(cols[col])
+    cols.pop(col)
     array = np.delete(array, col, 1)
     dok = dok_matrix(array)
     eq_mat(matrix, dok)
@@ -69,17 +75,22 @@ def test_append_remove():
   n_append_row = 5
   n_append_col = 5
 
+  cols = matrix.getcols()
   for row in xrange(n_append_row):
     new_rand = rand_matrix(1, array.shape[1], 0.2, format="dok")
-    matrix.append_row(new_rand)
+    print list(new_rand.iteritems())
+    new = dict([(cols[k[1]], v) for k, v in new_rand.iteritems()])
+    matrix.append_row(new)
     array = np.insert(array, array.shape[0], new_rand.toarray(), 0)
     dok = dok_matrix(array)
     eq_mat(matrix, dok)
     check_iters(matrix, dok)
 
+  rows = matrix.getrows()
   for col in xrange(n_append_col):
     new_rand = rand_matrix(array.shape[0], 1, 0.2, format="dok")
-    matrix.append_col(new_rand)
+    new = dict([(rows[k[0]], v) for k, v in new_rand.iteritems()])
+    matrix.append_col(new)
     array = np.insert(array, array.shape[1], new_rand.T.toarray(), 1)
     dok = dok_matrix(array)
     eq_mat(matrix, dok)
@@ -90,21 +101,27 @@ def test_iters():
   check_iters(matrix, dok)
 
 def check_iters(matrix, dok):
-  assert_array_equal(matrix.listrows(), xrange(dok.shape[0]))
+  #assert_array_equal(matrix.listrows(), xrange(dok.shape[0]))
+
+  rows = matrix.getrows()
+  rowmap = dict([(x,i) for i,x in enumerate(rows)])
+  cols = matrix.getcols()
+  colmap = dict([(x,i) for i,x in enumerate(cols)])
+
   # .. check through rows ..
   for row in matrix.listrows():
     col_dok = dok_matrix((1, matrix.shape[1]))
     for col, value in matrix.listcols(row):
-      col_dok[0,col] = value
-    assert_array_equal(col_dok.toarray(), dok[row,:].toarray())
+      col_dok[0, colmap[col]] = value
+    assert_array_equal(col_dok.toarray(), dok[rowmap[row],:].toarray())
 
-  assert_array_equal(matrix.listcols(), xrange(dok.shape[1]))
+  #assert_array_equal(matrix.listcols(), xrange(dok.shape[1]))
   # .. check through cols ..
   for col in matrix.listcols():
     row_dok = dok_matrix((matrix.shape[0], 1))
     for row, value in matrix.listrows(col):
-      row_dok[row, 0] = value
-    assert_array_equal(row_dok, dok[:, col])
+      row_dok[rowmap[row], 0] = value
+    assert_array_equal(row_dok, dok[:, colmap[col]])
 
 
 def test_dot():
@@ -118,7 +135,9 @@ def test_dot():
 
   # .. setting values ..
   ml.from_matrix(dl)
-  mr.from_matrix(dr)
+  mr.set_cols(dr.shape[1])
+  mr.set_matrix(dr)
   eq_mat(mp, dp)
 
+  # .. adding right rows/left cols ...
 
