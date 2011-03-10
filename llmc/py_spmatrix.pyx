@@ -142,14 +142,14 @@ cdef class ProdMatrix(Matrix):
     self._m = matrix_new(0, 0)
     self.view = mult_view_new(left._m, right._m, self._m)
 
-  cpdef left_col(self, row):
+  cpdef left_col(self, int row):
     return <int>mult_view_map_to_left(self.view, <vector*><int>row)
 
-  cpdef right_row(self, col):
+  cpdef right_row(self, int col):
     return <int>mult_view_map_to_right(self.view, <vector*><int>col)
 
-  cpdef prod_row(self, row):
+  cpdef prod_row(self, int row):
     return <int>mult_view_map_prod_row(self.view, <vector*><int>row)
 
-  cpdef prod_col(self, col):
+  cpdef prod_col(self, int col):
     return <int>mult_view_map_prod_col(self.view, <vector*><int>col)
