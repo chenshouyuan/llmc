@@ -269,14 +269,15 @@ cdef:
 
   void matrix_remove_row(matrix *m, row_type *row):
     cdef int i
-    cdef _ll_item *p
+    cdef _ll_item *p, *next
     cdef matrix_entry *entry
     if row.sum != 0:
       p = row.store.list.head.next
       while p:
         entry = <matrix_entry*>p.data
+        next = p.next        
         matrix_update(m, -entry.value, row, entry.col)
-        p = p.next
+        p = next
     for i in range(m.callback_count):
       if m.callbacks[i].remove_row:
         m.callbacks[i].remove_row(m.callbacks[i].ptr, row)    
@@ -286,14 +287,15 @@ cdef:
 
   void matrix_remove_col(matrix *m, col_type *col):
     cdef int i
-    cdef _ll_item *p
+    cdef _ll_item *p, *next
     cdef matrix_entry *entry    
     if col.sum != 0:
       p = col.store.list.head.next
       while p:
         entry = <matrix_entry*>p.data
+        next = p.next
         matrix_update(m, -entry.value, entry.row, col)
-        p = p.next    
+        p = next 
     for i in range(m.callback_count):
       if m.callbacks[i].remove_col:
         m.callbacks[i].remove_col(m.callbacks[i].ptr, col)       
@@ -312,7 +314,7 @@ cdef:
       matrix_remove_row(m, row)
     if m.squeeze_col and col.sum == 0:
       matrix_remove_col(m, col)  
-
+    
   struct matrix_mult_view:
     matrix *left, *right, *prod
     HashTable *right_row_map, *left_col_map
